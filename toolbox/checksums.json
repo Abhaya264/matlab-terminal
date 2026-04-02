@@ -1,0 +1,21 @@
+{
+    "version": "0.1.0",
+    "binaries": {
+        "glnxa64": {
+            "url": "https://github.com/mathworks/matlab-terminal-server/releases/download/v0.1.0/matlab-terminal-server-linux-amd64",
+            "sha256": "placeholder"
+        },
+        "maci64": {
+            "url": "https://github.com/mathworks/matlab-terminal-server/releases/download/v0.1.0/matlab-terminal-server-darwin-amd64",
+            "sha256": "placeholder"
+        },
+        "maca64": {
+            "url": "https://github.com/mathworks/matlab-terminal-server/releases/download/v0.1.0/matlab-terminal-server-darwin-arm64",
+            "sha256": "placeholder"
+        },
+        "win64": {
+            "url": "https://github.com/mathworks/matlab-terminal-server/releases/download/v0.1.0/matlab-terminal-server-windows-amd64.exe",
+            "sha256": "placeholder"
+        }
+    }
+}

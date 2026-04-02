@@ -1,0 +1,77 @@
+# Copyright 2026 The MathWorks, Inc.
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build-server:
+    name: Build Go Server (linux/amd64)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Build
+        run: GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o ../dist/matlab-terminal-server .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-binary
+          path: dist/matlab-terminal-server
+
+  build-mltbx:
+    name: Package Terminal.mltbx
+    needs: build-server
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download server binary
+        uses: actions/download-artifact@v4
+        with:
+          name: server-binary
+          path: dist/
+
+      - name: Make binary executable
+        run: chmod +x dist/matlab-terminal-server
+
+      - name: Set up MATLAB
+        uses: matlab-actions/setup-matlab@v2
+
+      - name: Build .mltbx
+        uses: matlab-actions/run-command@v2
+        with:
+          command: run('build/package.m')
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Terminal.mltbx
+          path: dist/Terminal.mltbx
+
+  release:
+    name: Create GitHub Release
+    needs: build-mltbx
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download .mltbx
+        uses: actions/download-artifact@v4
+        with:
+          name: Terminal.mltbx
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Terminal.mltbx
+          generate_release_notes: true

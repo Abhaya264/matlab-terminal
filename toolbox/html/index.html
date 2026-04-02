@@ -1,0 +1,449 @@
+<!-- Copyright 2026 The MathWorks, Inc. -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MATLAB Terminal</title>
+    <link rel="stylesheet" href="lib/xterm/xterm.css">
+    <link rel="stylesheet" href="terminal.css">
+</head>
+<body>
+    <div id="loading-overlay">
+        <div class="loading-content">
+            <div class="loading-spinner"></div>
+            <div class="loading-title">Starting Terminal...</div>
+            <div class="loading-shortcuts">
+                <table>
+                    <tr><td class="key">Ctrl+Shift+C</td><td>Copy selection</td></tr>
+                    <tr><td class="key">Ctrl+Shift+V</td><td>Paste</td></tr>
+                    <tr><td class="key">exit</td><td>Close terminal</td></tr>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div id="tab-bar">
+        <div id="tabs"></div>
+        <button id="add-tab-btn" title="New Terminal">+</button>
+    </div>
+    <div id="terminal-container"></div>
+    <div id="debug" style="position:fixed;bottom:0;left:0;right:0;background:#300;color:#f88;font-family:monospace;font-size:11px;padding:4px 8px;z-index:9999;max-height:120px;overflow:auto;display:none;"></div>
+
+    <script src="lib/xterm/xterm.js"></script>
+    <script src="lib/xterm/addon-fit.js"></script>
+    <script>
+    (function () {
+        'use strict';
+
+        var DEBUG = false;
+        var debugEl = document.getElementById('debug');
+        if (DEBUG) debugEl.style.display = 'block';
+        function dbg(msg) {
+            if (!DEBUG) return;
+            debugEl.textContent += msg + '\n';
+            debugEl.scrollTop = debugEl.scrollHeight;
+        }
+
+        // ---------------------
+        // State
+        // ---------------------
+        var htmlComp = null; // reference to MATLAB htmlComponent
+        var config = null;
+        var tabs = {};
+        var activeTabId = null;
+        var tabCounter = 0;
+        var pendingTabs = [];
+
+        var tabsEl = document.getElementById('tabs');
+        var addTabBtn = document.getElementById('add-tab-btn');
+        var containerEl = document.getElementById('terminal-container');
+
+        // ---------------------
+        // Communication with MATLAB via Data channel
+        // ---------------------
+        var inputBuffer = {};   // id -> accumulated keystrokes
+        var inputFlushTimer = null;
+        var msgQueue = [];      // outbound message queue to MATLAB
+        var sendTimer = null;
+
+        function sendToMATLAB(msg) {
+            // Queue messages and send one at a time with spacing to avoid
+            // Data channel overwrites (last-write-wins).
+            msgQueue.push(msg);
+            drainQueue();
+        }
+
+        function drainQueue() {
+            if (sendTimer || msgQueue.length === 0 || !htmlComp) return;
+            htmlComp.Data = msgQueue.shift();
+            // Space out sends to give MATLAB time to read each one.
+            if (msgQueue.length > 0) {
+                sendTimer = setTimeout(function () {
+                    sendTimer = null;
+                    drainQueue();
+                }, 50);
+            }
+        }
+
+        function bufferInput(id, data) {
+            if (!inputBuffer[id]) {
+                inputBuffer[id] = '';
+            }
+            inputBuffer[id] += data;
+
+            if (!inputFlushTimer) {
+                inputFlushTimer = setTimeout(flushInput, 80);
+            }
+        }
+
+        function flushInput() {
+            inputFlushTimer = null;
+            var ids = Object.keys(inputBuffer);
+            for (var i = 0; i < ids.length; i++) {
+                var id = ids[i];
+                if (inputBuffer[id]) {
+                    sendToMATLAB({ type: 'input', id: id, data: inputBuffer[id] });
+                    inputBuffer[id] = '';
+                }
+            }
+        }
+
+        function handleMATLABMessage(data) {
+            if (!data || typeof data !== 'object' || !data.type) return;
+
+            dbg('From MATLAB: ' + data.type);
+
+            switch (data.type) {
+                case 'init':
+                    initialize(data.theme);
+                    break;
+                case 'created':
+                    finalizeTab(data.id);
+                    break;
+                case 'output':
+                    writeOutput(data.id, data.data);
+                    break;
+                case 'exited':
+                    markTabExited(data.id, data.exitCode);
+                    break;
+                case 'batch':
+                    // Process a batch of messages from MATLAB polling.
+                    var msgs = data.messages;
+                    if (!msgs) {
+                        dbg('batch: no messages field');
+                        break;
+                    }
+                    // MATLAB may send a struct array or a single struct.
+                    if (!Array.isArray(msgs)) {
+                        msgs = [msgs];
+                    }
+                    dbg('batch: ' + msgs.length + ' msgs');
+                    for (var i = 0; i < msgs.length; i++) {
+                        var m = msgs[i];
+                        dbg('  msg[' + i + '] type=' + m.type + ' id=' + m.id + ' hasData=' + (!!m.data));
+                        if (m.type === 'output') {
+                            writeOutput(m.id, m.data);
+                        } else if (m.type === 'exited') {
+                            markTabExited(m.id, m.exitCode);
+                        }
+                    }
+                    break;
+            }
+        }
+
+        // ---------------------
+        // MATLAB uihtml setup (called by framework)
+        // ---------------------
+        var initialized = false;
+
+        function initialize(theme) {
+            if (initialized) return;
+            initialized = true;
+            dbg('Initializing with theme');
+            config = { theme: theme };
+            applyTheme(theme);
+            // Auto-create the first terminal tab.
+            createTab();
+        }
+
+        window.setup = function (component) {
+            dbg('setup() called by MATLAB');
+            htmlComp = component;
+
+            component.addEventListener('DataChanged', function (event) {
+                handleMATLABMessage(event.Data);
+            });
+
+            // Check if data is already set.
+            if (component.Data && component.Data.type) {
+                handleMATLABMessage(component.Data);
+            }
+        };
+
+        // ---------------------
+        // Theme
+        // ---------------------
+        function applyTheme(theme) {
+            if (!theme) return;
+            var root = document.documentElement;
+            if (!theme.isDark) {
+                root.classList.add('light');
+            } else {
+                root.classList.remove('light');
+            }
+            if (theme.background) root.style.setProperty('--bg-color', theme.background);
+            if (theme.foreground) root.style.setProperty('--fg-color', theme.foreground);
+            if (theme.fontFamily) root.style.setProperty('--font-family', theme.fontFamily);
+            if (theme.fontSize) root.style.setProperty('--font-size', theme.fontSize + 'px');
+        }
+
+        function buildXtermTheme(theme) {
+            if (!theme) return {};
+            return {
+                background: theme.background || '#1e1e1e',
+                foreground: theme.foreground || '#d4d4d4',
+                cursor: theme.cursor || '#ffffff',
+                cursorAccent: theme.background || '#1e1e1e',
+                selectionBackground: theme.selectionBackground || '#264f78'
+            };
+        }
+
+        // ---------------------
+        // Output handling
+        // ---------------------
+        function writeOutput(id, base64Data) {
+            var entry = tabs[id];
+            if (!entry) return;
+            var raw = atob(base64Data);
+            var bytes = new Uint8Array(raw.length);
+            for (var i = 0; i < raw.length; i++) {
+                bytes[i] = raw.charCodeAt(i);
+            }
+            entry.terminal.write(bytes);
+        }
+
+        function markTabExited(id, exitCode) {
+            var entry = tabs[id];
+            if (!entry) return;
+            entry.exited = true;
+            // Auto-close the tab immediately.
+            closeTab(id);
+        }
+
+        // ---------------------
+        // Tab Management
+        // ---------------------
+        function createTab() {
+            tabCounter++;
+            var tempName = 'Terminal ' + tabCounter;
+
+            var tabEl = document.createElement('div');
+            tabEl.className = 'tab';
+            tabEl.innerHTML =
+                '<span class="tab-label">' + tempName + '</span>' +
+                '<button class="tab-close" title="Close">&times;</button>';
+
+            var wrapper = document.createElement('div');
+            wrapper.className = 'terminal-wrapper';
+            containerEl.appendChild(wrapper);
+
+            var theme = config && config.theme;
+            var terminal = new Terminal({
+                fontFamily: (theme && theme.fontFamily) || 'Consolas, monospace',
+                fontSize: (theme && theme.fontSize) || 14,
+                theme: buildXtermTheme(theme),
+                cursorBlink: true,
+                allowProposedApi: true
+            });
+
+            var fitAddon = new FitAddon.FitAddon();
+            terminal.loadAddon(fitAddon);
+            terminal.open(wrapper);
+
+            pendingTabs.push({
+                terminal: terminal,
+                fitAddon: fitAddon,
+                wrapper: wrapper,
+                tab: tabEl,
+                exited: false
+            });
+
+            tabsEl.appendChild(tabEl);
+
+            // Tell MATLAB to create a session on the server.
+            sendToMATLAB({ type: 'create' });
+
+            switchToWrapper(wrapper, tabEl);
+
+            setTimeout(function () {
+                fitAddon.fit();
+            }, 50);
+        }
+
+        function finalizeTab(id) {
+            if (pendingTabs.length === 0) {
+                dbg('Received "created" but no pending tab');
+                return;
+            }
+
+            var entry = pendingTabs.shift();
+            tabs[id] = entry;
+
+            // Hide loading overlay once first tab is ready.
+            var overlay = document.getElementById('loading-overlay');
+            if (overlay) overlay.classList.add('hidden');
+            entry.tab.dataset.tabId = id;
+            activeTabId = id;
+
+            entry.tab.addEventListener('click', function (e) {
+                if (e.target.classList.contains('tab-close')) return;
+                switchTab(id);
+            });
+
+            entry.tab.querySelector('.tab-close').addEventListener('click', function (e) {
+                e.stopPropagation();
+                closeTab(id);
+            });
+
+            // Keystrokes -> buffer -> MATLAB -> server
+            entry.terminal.onData(function (data) {
+                if (!entry.exited) {
+                    bufferInput(id, data);
+                }
+            });
+
+            // Resize -> MATLAB -> server
+            entry.terminal.onResize(function (size) {
+                sendToMATLAB({ type: 'resize', id: id, cols: size.cols, rows: size.rows });
+            });
+
+            // Copy/Paste: Ctrl+Shift+C / Ctrl+Shift+V
+            if (navigator.clipboard) {
+                entry.terminal.attachCustomKeyEventHandler(function (e) {
+                    if (e.ctrlKey && e.shiftKey && e.type === 'keydown') {
+                        if (e.key === 'C') {
+                            try {
+                                var sel = entry.terminal.getSelection();
+                                if (sel) navigator.clipboard.writeText(sel);
+                            } catch (err) {}
+                            return false;
+                        }
+                        if (e.key === 'V') {
+                            try {
+                                navigator.clipboard.readText().then(function (text) {
+                                    if (text && !entry.exited) bufferInput(id, text);
+                                });
+                            } catch (err) {}
+                            return false;
+                        }
+                    }
+                    return true;
+                });
+            }
+
+            // Force layout reflow then fit — fixes xterm.js not rendering
+            // keystrokes when no other element triggers a reflow.
+            void entry.wrapper.offsetHeight;
+            entry.fitAddon.fit();
+
+            // Send initial size.
+            var dims = entry.fitAddon.proposeDimensions();
+            if (dims) {
+                sendToMATLAB({ type: 'resize', id: id, cols: dims.cols, rows: dims.rows });
+            }
+
+            entry.terminal.focus();
+
+            // Additional delayed fit calls to catch late layout changes.
+            // Also re-send resize in case container size changed since initial send.
+            function delayedFitAndResize() {
+                entry.fitAddon.fit();
+                entry.terminal.refresh(0, entry.terminal.rows - 1);
+                var d = entry.fitAddon.proposeDimensions();
+                if (d && d.cols > 0 && d.rows > 0) {
+                    sendToMATLAB({ type: 'resize', id: id, cols: d.cols, rows: d.rows });
+                }
+            }
+            setTimeout(function () {
+                delayedFitAndResize();
+                entry.terminal.focus();
+            }, 100);
+            setTimeout(delayedFitAndResize, 500);
+            setTimeout(delayedFitAndResize, 1500);
+        }
+
+        function closeTab(id) {
+            var entry = tabs[id];
+            if (!entry) return;
+
+            if (!entry.exited) {
+                sendToMATLAB({ type: 'close', id: id });
+            }
+
+            entry.terminal.dispose();
+            entry.tab.remove();
+            entry.wrapper.remove();
+            delete tabs[id];
+
+            if (activeTabId === id) {
+                var remaining = Object.keys(tabs);
+                if (remaining.length > 0) {
+                    switchTab(remaining[remaining.length - 1]);
+                } else {
+                    activeTabId = null;
+                }
+            }
+        }
+
+        function switchTab(id) {
+            if (id === activeTabId) return;
+            var entry = tabs[id];
+            if (!entry) return;
+
+            switchToWrapper(entry.wrapper, entry.tab);
+            activeTabId = id;
+
+            setTimeout(function () {
+                void entry.wrapper.offsetHeight;
+                entry.fitAddon.fit();
+                entry.terminal.refresh(0, entry.terminal.rows - 1);
+                entry.terminal.focus();
+            }, 10);
+        }
+
+        function switchToWrapper(wrapper, tabEl) {
+            var wrappers = containerEl.querySelectorAll('.terminal-wrapper');
+            for (var i = 0; i < wrappers.length; i++) {
+                wrappers[i].classList.remove('active');
+            }
+            var allTabs = tabsEl.querySelectorAll('.tab');
+            for (var j = 0; j < allTabs.length; j++) {
+                allTabs[j].classList.remove('active');
+            }
+            wrapper.classList.add('active');
+            tabEl.classList.add('active');
+        }
+
+        // ---------------------
+        // Add Tab Button
+        // ---------------------
+        addTabBtn.addEventListener('click', function () {
+            createTab();
+        });
+
+        // ---------------------
+        // Resize Handling
+        // ---------------------
+        var resizeObserver = new ResizeObserver(function () {
+            if (activeTabId && tabs[activeTabId]) {
+                var entry = tabs[activeTabId];
+                entry.fitAddon.fit();
+                entry.terminal.refresh(0, entry.terminal.rows - 1);
+            }
+        });
+        resizeObserver.observe(containerEl);
+
+    })();
+    </script>
+</body>
+</html>
