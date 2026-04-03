@@ -13,8 +13,20 @@ permissions:
 
 jobs:
   build-server:
-    name: Build Go Server
+    name: Build Go Server (${{ matrix.matlab_arch }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            matlab_arch: glnxa64
+          - goos: darwin
+            goarch: amd64
+            matlab_arch: maci64
+          - goos: darwin
+            goarch: arm64
+            matlab_arch: maca64
     defaults:
       run:
         working-directory: server
@@ -25,8 +37,11 @@ jobs:
         with:
           go-version: '1.21'
 
-      - name: Build
-        run: go build -ldflags="-s -w" -o ../dist/matlab-terminal-server .
-
       - name: Vet
         run: go vet ./...
+
+      - name: Build
+        run: |
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
+            go build -ldflags="-s -w" \
+            -o ../dist/${{ matrix.matlab_arch }}/matlab-terminal-server .
