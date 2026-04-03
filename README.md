@@ -1,4 +1,4 @@
-# MATLAB Terminal
+# Terminal in MATLAB 
 
 Embedded system terminal for MATLAB Desktop. Run CLI tools, git, docker, AI coding agents, and more — without leaving MATLAB.
 
