@@ -11,8 +11,23 @@ permissions:
 
 jobs:
   build-server:
-    name: Build Go Server (linux/amd64)
+    name: Build Go Server (${{ matrix.goos }}/${{ matrix.goarch }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            matlab_arch: glnxa64
+            binary: matlab-terminal-server
+          - goos: darwin
+            goarch: amd64
+            matlab_arch: maci64
+            binary: matlab-terminal-server
+          - goos: darwin
+            goarch: arm64
+            matlab_arch: maca64
+            binary: matlab-terminal-server
     defaults:
       run:
         working-directory: server
@@ -24,12 +39,16 @@ jobs:
           go-version: '1.21'
 
       - name: Build
-        run: GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o ../dist/matlab-terminal-server .
+        run: |
+          mkdir -p ../dist/${{ matrix.matlab_arch }}
+          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
+            go build -ldflags="-s -w" \
+            -o ../dist/${{ matrix.matlab_arch }}/${{ matrix.binary }} .
 
       - uses: actions/upload-artifact@v4
         with:
-          name: server-binary
-          path: dist/matlab-terminal-server
+          name: server-${{ matrix.matlab_arch }}
+          path: dist/${{ matrix.matlab_arch }}/
 
   build-mltbx:
     name: Package Terminal.mltbx
@@ -38,14 +57,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download server binary
+      - name: Download all server binaries
         uses: actions/download-artifact@v4
         with:
-          name: server-binary
+          pattern: server-*
           path: dist/
+          merge-multiple: false
 
-      - name: Make binary executable
-        run: chmod +x dist/matlab-terminal-server
+      - name: Arrange binaries into dist/<arch>/
+        run: |
+          for dir in dist/server-*/; do
+            arch=$(basename "$dir" | sed 's/^server-//')
+            mkdir -p "dist/$arch"
+            cp "$dir"/* "dist/$arch/"
+          done
+          chmod +x dist/*/matlab-terminal-server
+          echo "--- dist/ layout ---"
+          find dist -type f
 
       - name: Set up MATLAB
         uses: matlab-actions/setup-matlab@v2

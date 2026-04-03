@@ -19,26 +19,37 @@ files = {
     'html/lib/xterm/addon-fit.js'
 };
 
-% Add the server binary for the current platform.
-arch = computer('arch');
-binaryName = 'matlab-terminal-server';
-if strcmp(arch, 'win64')
-    binaryName = [binaryName, '.exe'];
+% Add server binaries for all available platforms.
+platforms = {'glnxa64', 'maci64', 'maca64', 'win64'};
+binaryBaseName = 'matlab-terminal-server';
+binaryPaths = struct();
+foundAny = false;
+for p = 1:numel(platforms)
+    plat = platforms{p};
+    bn = binaryBaseName;
+    if strcmp(plat, 'win64')
+        bn = [bn, '.exe']; %#ok<AGROW>
+    end
+    bp = fullfile(projectDir, 'dist', plat, bn);
+    if isfile(bp)
+        files{end+1} = ['bin/', plat, '/', bn]; %#ok<SAGROW>
+        binaryPaths.(plat) = bp;
+        foundAny = true;
+    end
 end
-binaryPath = fullfile(projectDir, 'dist', binaryName);
-if isfile(binaryPath)
-    files{end+1} = ['bin/', arch, '/', binaryName];
-else
+if ~foundAny
     warning('build_assets:NoBinary', ...
-        'Server binary not found at:\n  %s\nSkipping.', binaryPath);
+        'No server binaries found in dist/<arch>/ for any platform.');
 end
 
 assets = struct();
 for i = 1:numel(files)
     rel = files{i};
-    % Resolve source path: bin/ files come from server/, others from toolbox/.
+    % Resolve source path: bin/ files come from dist/<arch>/, others from toolbox/.
     if startsWith(rel, 'bin/')
-        src = binaryPath;
+        parts = strsplit(rel, '/');
+        plat = parts{2};
+        src = binaryPaths.(plat);
     else
         src = fullfile(toolboxDir, rel);
     end

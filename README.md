@@ -69,7 +69,7 @@ delete(t);
 ### Requirements
 
 - MATLAB (minimum supported release TBD — see below)
-- Linux (macOS and Windows support planned)
+- Linux or macOS (Windows support planned)
 
 The exact minimum MATLAB release is yet to be determined. The following features constrain it:
 
@@ -116,7 +116,9 @@ matlab-terminal/
 │   ├── package.m                   # Builds .mltbx (calls build_assets.m)
 │   └── setup_xterm.sh              # Downloads and vendors xterm.js
 ├── dist/                           # Build output (gitignored)
-│   ├── matlab-terminal-server      # Compiled Go binary
+│   ├── glnxa64/                    # Linux binary
+│   ├── maci64/                     # macOS Intel binary
+│   ├── maca64/                     # macOS Apple Silicon binary
 │   └── Terminal.mltbx              # Installable toolbox package
 ├── DESIGN.md                       # Architecture decisions and security analysis
 └── README.md
@@ -143,8 +145,14 @@ See [DESIGN.md](DESIGN.md) for detailed architecture decisions and security anal
 1. **Build the Go server** (requires Go 1.21+):
    ```bash
    cd server/
-   go build -o ../dist/matlab-terminal-server .
    ```
+   Build into `dist/<arch>/` where `<arch>` matches your platform:
+
+   | Platform | `<arch>` | Build command |
+   |----------|----------|---------------|
+   | Linux x86_64 | `glnxa64` | `mkdir -p ../dist/glnxa64 && go build -o ../dist/glnxa64/matlab-terminal-server .` |
+   | macOS Intel | `maci64` | `mkdir -p ../dist/maci64 && GOARCH=amd64 go build -o ../dist/maci64/matlab-terminal-server .` |
+   | macOS Apple Silicon | `maca64` | `mkdir -p ../dist/maca64 && GOARCH=arm64 go build -o ../dist/maca64/matlab-terminal-server .` |
 
 2. **Add the toolbox to your MATLAB path**:
    ```matlab
@@ -164,7 +172,7 @@ The release artifact is a single file: **`Terminal.mltbx`**. It bundles the MATL
 
 #### Local build
 
-Requires MATLAB and a compiled Go binary in `dist/`.
+Requires MATLAB and compiled Go binaries in `dist/<arch>/`.
 
 ```matlab
 cd /path/to/matlab-terminal
@@ -177,106 +185,40 @@ Output: `dist/Terminal.mltbx`
 
 #### What `package.m` does
 
-1. **`build_assets.m`** — Reads `html/` files and `dist/matlab-terminal-server`, packs them as byte arrays into `toolbox/web_assets.mat`. This works around `packageToolbox` silently dropping `.html`, `.css`, `.js`, and binary files.
+1. **`build_assets.m`** — Reads `html/` files and all server binaries from `dist/<arch>/`, packs them as byte arrays into `toolbox/web_assets.mat`. This works around `packageToolbox` silently dropping `.html`, `.css`, `.js`, and binary files.
 2. **`packageToolbox`** — Creates the `.mltbx` from `toolbox/`, which now includes the `.mat` alongside the `.m` files.
 
 At runtime, `Terminal.m` extracts assets from `web_assets.mat` to `prefdir/matlab-terminal/` on first launch (version-stamped to avoid re-extraction).
 
 ### CI/CD Pipeline (GitHub Actions)
 
-A release build involves two stages: compiling the Go binary, then packaging the `.mltbx`.
+A release build involves three stages: cross-compiling Go binaries for all platforms, bundling them into a `.mltbx`, and creating a GitHub Release.
 
-```yaml
-# .github/workflows/release.yml (outline)
-name: Release
-on:
-  push:
-    tags: ['v*']
+The workflow is defined in `.github/workflows/release.yml` and triggered by pushing a version tag:
 
-jobs:
-  build-server:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.21'
-      - run: |
-          cd server
-          GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o ../dist/matlab-terminal-server .
-      - uses: actions/upload-artifact@v4
-        with:
-          name: server-binary
-          path: dist/matlab-terminal-server
-
-  build-mltbx:
-    needs: build-server
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: server-binary
-          path: dist/
-      - run: chmod +x dist/matlab-terminal-server
-      - uses: matlab-actions/setup-matlab@v2
-      - uses: matlab-actions/run-command@v2
-        with:
-          command: run('build/package.m')
-      - uses: actions/upload-artifact@v4
-        with:
-          name: Terminal.mltbx
-          path: dist/Terminal.mltbx
-
-  release:
-    needs: build-mltbx
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: Terminal.mltbx
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: Terminal.mltbx
+```bash
+git tag v0.1.0
+git push origin v0.1.0
 ```
+
+**Pipeline stages:**
+
+1. **`build-server`** — Cross-compiles the Go binary for Linux (`glnxa64`), macOS Intel (`maci64`), and macOS Apple Silicon (`maca64`) in parallel using a build matrix.
+2. **`build-mltbx`** — Downloads all binaries into `dist/<arch>/`, sets up MATLAB via `matlab-actions/setup-matlab`, and runs `build/package.m` to create a single `.mltbx` containing all platform binaries.
+3. **`release`** — Creates a GitHub Release with the `.mltbx` attached and auto-generated release notes.
 
 > **Note**: The `matlab-actions/setup-matlab` action requires a [MATLAB license](https://github.com/matlab-actions/setup-matlab#use-matlab-batch-licensing-token). For public repositories, MathWorks provides free CI licenses via [MATLAB batch licensing tokens](https://www.mathworks.com/help/cloudcenter/ug/matlab-batch-licensing-tokens.html).
 
-#### Multi-platform builds
-
-Currently, `build_assets.m` bundles the binary for the current platform only. To support multiple platforms, the CI pipeline would:
-
-1. Cross-compile Go binaries for each target (`linux/amd64`, `darwin/amd64`, `darwin/arm64`, `windows/amd64`)
-2. Either produce a separate `.mltbx` per platform, or modify `build_assets.m` to embed all binaries and have `Terminal.m` extract the correct one at runtime based on `computer('arch')`
-
-### Cross-Compiling the Go Server
-
-```bash
-cd server/
-
-# Linux (amd64)
-GOOS=linux  GOARCH=amd64 go build -ldflags="-s -w" -o ../dist/matlab-terminal-server-linux-amd64 .
-
-# macOS (Intel)
-GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o ../dist/matlab-terminal-server-darwin-amd64 .
-
-# macOS (Apple Silicon)
-GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o ../dist/matlab-terminal-server-darwin-arm64 .
-
-# Windows
-GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o ../dist/matlab-terminal-server-windows-amd64.exe .
-```
-
-The `-ldflags="-s -w"` flag strips debug symbols, reducing binary size by ~30%.
+The resulting `.mltbx` is a single cross-platform artifact. At install time, `Terminal.m` extracts the correct binary for the user's platform based on `computer('arch')`.
 
 ## Known Limitations and Roadmap
 
 ### Not yet implemented
-- **macOS and Windows support** — The Go server compiles cross-platform, but PTY handling and binary packaging have only been tested on Linux.
-- **Configurable shell** — Currently uses `$SHELL` (Linux). No UI to switch shells or set a default.
+- **Windows support** — The Go server compiles for Windows, but PTY handling (`creack/pty`) and the MATLAB integration have not been tested on Windows.
+- **Configurable shell** — Currently uses `$SHELL` (Linux/macOS). No UI to switch shells or set a default.
 - **Apps tab icon** — `AppGalleryFiles` in `ToolboxOptions` does not reliably register apps in the MATLAB Apps toolstrip. The toolbox installs and works, but there is no icon in the Apps tab.
 - **Session persistence** — Terminal sessions are not preserved across MATLAB restarts.
-- **Multi-platform .mltbx** — Currently bundles the binary for one platform only. A single .mltbx supporting all platforms would require embedding all binaries and selecting at runtime.
+- **Multi-platform .mltbx** — The CI pipeline builds a single `.mltbx` with Linux and macOS binaries. Windows is not yet included.
 
 ### Known issues
 - **Character swallowing** — The uihtml Data channel is property-based (last-write-wins). Fast typing can lose characters, especially in matlab-proxy. Future fix: migrate to `sendEventToMATLAB`/`sendEventToHTMLSource` (R2023a+).

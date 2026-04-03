@@ -426,15 +426,15 @@ classdef Terminal < handle
                 binaryName = [binaryName, '.exe'];
             end
 
-            % Check dist/ directory (development builds).
-            candidate = fullfile(fileparts(fileparts(mfilename('fullpath'))), 'dist', binaryName);
+            % Check dist/<arch>/ directory (development builds).
+            arch = computer('arch');
+            candidate = fullfile(fileparts(fileparts(mfilename('fullpath'))), 'dist', arch, binaryName);
             if isfile(candidate)
                 binaryPath = candidate;
                 return;
             end
 
             % Check extracted cache (from web_assets.mat).
-            arch = computer('arch');
             candidate = fullfile(prefdir, 'matlab-terminal', 'bin', arch, binaryName);
             if isfile(candidate)
                 binaryPath = candidate;
@@ -511,6 +511,10 @@ classdef Terminal < handle
                     warning('Terminal:ChecksumFailed', 'Could not compute checksum.');
                     return;
                 end
+            elseif ismac
+                [~, result] = system(sprintf('shasum -a 256 "%s"', filePath));
+                parts = strsplit(strtrim(result));
+                actualHash = parts{1};
             else
                 [~, result] = system(sprintf('sha256sum "%s"', filePath));
                 parts = strsplit(strtrim(result));
