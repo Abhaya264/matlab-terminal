@@ -6,20 +6,13 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"os"
-	"os/exec"
-	"strings"
 	"sync"
-	"syscall"
-
-	"github.com/creack/pty"
 )
 
 // Session represents a single PTY session.
 type Session struct {
-	ID   string
-	cmd  *exec.Cmd
-	ptmx *os.File
+	ID  string
+	pty ptyProcess
 
 	mu     sync.Mutex
 	closed bool
@@ -37,17 +30,15 @@ type SessionManager struct {
 	sessions map[string]*Session
 
 	defaultShell string
-	extraEnv     []string
 
 	nextID int
 }
 
 // NewSessionManager creates a new session manager.
-func NewSessionManager(defaultShell string, extraEnv []string) *SessionManager {
+func NewSessionManager(defaultShell string) *SessionManager {
 	return &SessionManager{
 		sessions:     make(map[string]*Session),
 		defaultShell: defaultShell,
-		extraEnv:     extraEnv,
 	}
 }
 
@@ -63,32 +54,14 @@ func (m *SessionManager) Create(shell string, cols, rows uint16, onOutput Output
 	id := fmt.Sprintf("s%d", m.nextID)
 	m.mu.Unlock()
 
-	cmd := exec.Command(shell)
-	// Build env: start with OS env, filter out TERM (MATLAB sets TERM=dumb),
-	// then add our extras and force xterm-256color.
-	env := os.Environ()
-	filtered := make([]string, 0, len(env))
-	for _, e := range env {
-		if !strings.HasPrefix(e, "TERM=") {
-			filtered = append(filtered, e)
-		}
-	}
-	cmd.Env = append(filtered, m.extraEnv...)
-	cmd.Env = append(cmd.Env, "TERM=xterm-256color")
-
-	// Start with PTY.
-	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{
-		Cols: cols,
-		Rows: rows,
-	})
+	p, err := startPTY(shell, cols, rows)
 	if err != nil {
 		return "", fmt.Errorf("failed to start pty: %w", err)
 	}
 
 	sess := &Session{
-		ID:   id,
-		cmd:  cmd,
-		ptmx: ptmx,
+		ID:  id,
+		pty: p,
 	}
 
 	m.mu.Lock()
@@ -99,7 +72,7 @@ func (m *SessionManager) Create(shell string, cols, rows uint16, onOutput Output
 	go func() {
 		buf := make([]byte, 4096)
 		for {
-			n, err := ptmx.Read(buf)
+			n, err := p.Read(buf)
 			if n > 0 {
 				data := make([]byte, n)
 				copy(data, buf[:n])
@@ -114,14 +87,7 @@ func (m *SessionManager) Create(shell string, cols, rows uint16, onOutput Output
 		}
 
 		// Wait for process to exit and get exit code.
-		exitCode := 0
-		if err := cmd.Wait(); err != nil {
-			if exitErr, ok := err.(*exec.ExitError); ok {
-				if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
-					exitCode = status.ExitStatus()
-				}
-			}
-		}
+		exitCode, _ := p.Wait()
 
 		m.mu.Lock()
 		delete(m.sessions, id)
@@ -139,7 +105,7 @@ func (m *SessionManager) Write(id string, data []byte) error {
 	if sess == nil {
 		return fmt.Errorf("session %s not found", id)
 	}
-	_, err := sess.ptmx.Write(data)
+	_, err := sess.pty.Write(data)
 	return err
 }
 
@@ -149,10 +115,7 @@ func (m *SessionManager) Resize(id string, cols, rows uint16) error {
 	if sess == nil {
 		return fmt.Errorf("session %s not found", id)
 	}
-	return pty.Setsize(sess.ptmx, &pty.Winsize{
-		Cols: cols,
-		Rows: rows,
-	})
+	return sess.pty.Resize(cols, rows)
 }
 
 // Close terminates a session.
@@ -171,12 +134,10 @@ func (m *SessionManager) Close(id string) error {
 	sess.closed = true
 
 	// Close PTY (this will cause the read goroutine to exit).
-	sess.ptmx.Close()
+	sess.pty.Close()
 
 	// Signal the process to terminate.
-	if sess.cmd.Process != nil {
-		sess.cmd.Process.Signal(syscall.SIGTERM)
-	}
+	sess.pty.Kill()
 
 	return nil
 }

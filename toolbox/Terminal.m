@@ -79,19 +79,24 @@ classdef Terminal < handle
             matlabRoot = matlabroot;
 
             % --- Start the server process ---
-            cmd = sprintf('"%s" --token "%s" --env "MATLAB_PID=%s" --env "MATLAB_ROOT=%s"', ...
-                obj.ServerBinary, obj.AuthToken, matlabPid, matlabRoot);
+            args = sprintf('--token "%s" --env "MATLAB_PID=%s" --env "MATLAB_ROOT=%s"', ...
+                obj.AuthToken, matlabPid, matlabRoot);
 
             tmpFile = [tempname, '.txt'];
-            bgCmd = sprintf('%s > "%s" 2>&1 & echo $!', cmd, tmpFile);
-            [status, pidStr] = system(bgCmd);
-            if status ~= 0
-                error('Terminal:ServerStartFailed', ...
-                    'Failed to start server process: %s', pidStr);
+            if ispc
+                % Windows: use a temp batch file to run in background.
+                batFile = [tempname, '.bat'];
+                fid = fopen(batFile, 'w');
+                fprintf(fid, '@"%s" %s > "%s" 2>&1\n', obj.ServerBinary, args, tmpFile);
+                fclose(fid);
+                system(sprintf('start "" /b cmd /c call "%s"', batFile));
+            else
+                bgCmd = sprintf('"%s" %s > "%s" 2>&1 &', obj.ServerBinary, args, tmpFile);
+                system(bgCmd);
             end
-            serverPid = str2double(strtrim(pidStr));
 
-            % Wait for the server to print its PORT line.
+            % Wait for the server to print its PID and PORT lines.
+            serverPid = [];
             port = [];
             maxWait = 5;
             elapsed = 0;
@@ -100,20 +105,28 @@ classdef Terminal < handle
                 elapsed = elapsed + 0.2;
                 if isfile(tmpFile)
                     raw = fileread(tmpFile);
-                    tok = regexp(raw, 'PORT:(\d+)', 'tokens', 'once');
-                    if ~isempty(tok)
-                        port = str2double(tok{1});
+                    pidTok = regexp(raw, 'PID:(\d+)', 'tokens', 'once');
+                    portTok = regexp(raw, 'PORT:(\d+)', 'tokens', 'once');
+                    if ~isempty(pidTok)
+                        serverPid = str2double(pidTok{1});
+                    end
+                    if ~isempty(portTok)
+                        port = str2double(portTok{1});
                         break;
                     end
                 end
             end
 
-            if isfile(tmpFile)
-                delete(tmpFile);
+            % Clean up temp files.
+            if isfile(tmpFile), delete(tmpFile); end
+            if ispc && exist('batFile', 'var') && isfile(batFile)
+                delete(batFile);
             end
 
             if isempty(port)
-                system(sprintf('kill %d 2>/dev/null', serverPid));
+                if ~isempty(serverPid)
+                    Terminal.killProcess(serverPid);
+                end
                 error('Terminal:NoPort', ...
                     'Server did not report a port within %d seconds.', maxWait);
             end
@@ -175,7 +188,7 @@ classdef Terminal < handle
             end
             if ~isempty(obj.ServerProcess) && isstruct(obj.ServerProcess) ...
                     && isfield(obj.ServerProcess, 'pid') && ~isnan(obj.ServerProcess.pid)
-                system(sprintf('kill %d 2>/dev/null', obj.ServerProcess.pid));
+                Terminal.killProcess(obj.ServerProcess.pid);
             end
             if ~isempty(obj.ParentFigure) && isvalid(obj.ParentFigure)
                 obj.ParentFigure.CloseRequestFcn = '';
@@ -498,6 +511,15 @@ classdef Terminal < handle
                     'foreground',  '#333333', ...
                     'cursor',      '#333333', ...
                     'selectionBackground', '#add6ff');
+            end
+        end
+
+        function killProcess(pid)
+            %KILLPROCESS Terminate a process by PID (cross-platform).
+            if ispc
+                system(sprintf('taskkill /PID %d /F >nul 2>&1', pid));
+            else
+                system(sprintf('kill %d 2>/dev/null', pid));
             end
         end
 

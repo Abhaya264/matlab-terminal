@@ -21,12 +21,19 @@ jobs:
           - goos: linux
             goarch: amd64
             matlab_arch: glnxa64
+            binary: matlab-terminal-server
           - goos: darwin
             goarch: amd64
             matlab_arch: maci64
+            binary: matlab-terminal-server
           - goos: darwin
             goarch: arm64
             matlab_arch: maca64
+            binary: matlab-terminal-server
+          - goos: windows
+            goarch: amd64
+            matlab_arch: win64
+            binary: matlab-terminal-server.exe
     defaults:
       run:
         working-directory: server
@@ -38,10 +45,10 @@ jobs:
           go-version: '1.21'
 
       - name: Vet
-        run: go vet ./...
+        run: GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go vet ./...
 
       - name: Build
         run: |
           GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
             go build -ldflags="-s -w" \
-            -o ../dist/${{ matrix.matlab_arch }}/matlab-terminal-server .
+            -o ../dist/${{ matrix.matlab_arch }}/${{ matrix.binary }} .

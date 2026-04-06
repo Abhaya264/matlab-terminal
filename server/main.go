@@ -38,18 +38,21 @@ func main() {
 		log.Fatal("--token is required")
 	}
 
-	// Detect default shell.
-	shell := os.Getenv("SHELL")
-	if shell == "" {
-		shell = "/bin/sh"
+	// Apply extra environment variables to the current process.
+	// Child processes (PTY sessions) inherit them on all platforms.
+	for _, e := range envVars {
+		if k, v, ok := strings.Cut(e, "="); ok {
+			os.Setenv(k, v)
+		}
 	}
+	// Override TERM so PTY sessions get color support (harmless on Windows).
+	os.Setenv("TERM", "xterm-256color")
 
-	// Build extra environment slice.
-	extraEnv := make([]string, len(envVars))
-	copy(extraEnv, envVars)
+	// Detect default shell (platform-specific).
+	shell := defaultShell()
 
 	// Create session manager.
-	manager := NewSessionManager(shell, extraEnv)
+	manager := NewSessionManager(shell)
 
 	// Create HTTP API handler.
 	apiHandler := NewAPIHandler(token, manager)
@@ -72,6 +75,7 @@ func main() {
 	}
 
 	port := listener.Addr().(*net.TCPAddr).Port
+	fmt.Printf("PID:%d\n", os.Getpid())
 	fmt.Printf("PORT:%d\n", port)
 
 	// Monitor parent PID — exit if parent dies.
