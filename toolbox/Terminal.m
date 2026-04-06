@@ -12,6 +12,15 @@ classdef Terminal < handle
     %   Name-Value Arguments:
     %     Name        - Title of the terminal window (default: "MATLAB Terminal")
     %     WindowStyle - "docked" (default) or "normal"
+    %     Shell       - Shell program to run. Can be a name on PATH or an
+    %                   absolute path. Default: system shell ($SHELL on
+    %                   Unix, %COMSPEC% on Windows).
+    %
+    %                   Common values by platform:
+    %                     Linux/macOS: "bash", "zsh", "sh", "fish",
+    %                                  "/bin/bash", "/usr/bin/zsh"
+    %                     Windows:     "cmd.exe", "powershell.exe", "pwsh.exe",
+    %                                  "wsl.exe"
     %
     %   Static methods:
     %     Terminal.install()  — download the server binary for this platform
@@ -20,6 +29,8 @@ classdef Terminal < handle
     %   Examples:
     %     t = Terminal();
     %     t = Terminal(Name="Git", WindowStyle="normal");
+    %     t = Terminal(Shell="zsh");
+    %     t = Terminal(Shell="powershell.exe");
     %     delete(t);
 
     properties (Access = private)
@@ -36,6 +47,10 @@ classdef Terminal < handle
         OutQueue cell = {}  % queued messages from JS to send to server
     end
 
+    properties (SetAccess = private)
+        Shell string        % shell program for new sessions (empty = server default)
+    end
+
     properties (Constant, Access = private)
         DEFAULT_IDLE_TIMEOUT = 30   % seconds
         SERVER_BINARY_NAME = 'matlab-terminal-server'
@@ -49,6 +64,14 @@ classdef Terminal < handle
                 parent = []
                 options.Name (1,1) string = "MATLAB Terminal"
                 options.WindowStyle (1,1) string {mustBeMember(options.WindowStyle, ["docked", "normal"])} = "docked"
+                options.Shell (1,1) string = ""
+            end
+
+            obj.Shell = options.Shell;
+
+            % --- Validate shell if specified ---
+            if obj.Shell ~= ""
+                Terminal.validateShell(obj.Shell);
             end
 
             % --- Parent container ---
@@ -79,23 +102,24 @@ classdef Terminal < handle
             matlabRoot = matlabroot;
 
             % --- Start the server process ---
-            args = sprintf('--token "%s" --env "MATLAB_PID=%s" --env "MATLAB_ROOT=%s"', ...
-                obj.AuthToken, matlabPid, matlabRoot);
+            readyFile = [tempname, '.txt'];
+            args = sprintf('--token "%s" --env "MATLAB_PID=%s" --env "MATLAB_ROOT=%s" --ready-file "%s"', ...
+                obj.AuthToken, matlabPid, matlabRoot, readyFile);
 
-            tmpFile = [tempname, '.txt'];
             if ispc
                 % Windows: use a temp batch file to run in background.
                 batFile = [tempname, '.bat'];
                 fid = fopen(batFile, 'w');
-                fprintf(fid, '@"%s" %s > "%s" 2>&1\n', obj.ServerBinary, args, tmpFile);
+                fprintf(fid, '@"%s" %s >nul 2>&1\n', obj.ServerBinary, args);
                 fclose(fid);
                 system(sprintf('start "" /b cmd /c call "%s"', batFile));
             else
-                bgCmd = sprintf('"%s" %s > "%s" 2>&1 &', obj.ServerBinary, args, tmpFile);
-                system(bgCmd);
+                system(sprintf('"%s" %s >/dev/null 2>&1 &', obj.ServerBinary, args));
             end
 
-            % Wait for the server to print its PID and PORT lines.
+            % Wait for the server to write PID and PORT to the ready file.
+            % The server writes and closes this file immediately, so there
+            % is no file locking conflict on Windows.
             serverPid = [];
             port = [];
             maxWait = 5;
@@ -103,8 +127,8 @@ classdef Terminal < handle
             while elapsed < maxWait
                 pause(0.2);
                 elapsed = elapsed + 0.2;
-                if isfile(tmpFile)
-                    raw = fileread(tmpFile);
+                if isfile(readyFile)
+                    raw = fileread(readyFile);
                     pidTok = regexp(raw, 'PID:(\d+)', 'tokens', 'once');
                     portTok = regexp(raw, 'PORT:(\d+)', 'tokens', 'once');
                     if ~isempty(pidTok)
@@ -118,7 +142,7 @@ classdef Terminal < handle
             end
 
             % Clean up temp files.
-            if isfile(tmpFile), delete(tmpFile); end
+            if isfile(readyFile), delete(readyFile); end
             if ispc && exist('batFile', 'var') && isfile(batFile)
                 delete(batFile);
             end
@@ -280,7 +304,11 @@ classdef Terminal < handle
             %PROCESSJSMESSAGE Execute a single queued JS message.
             switch msg.type
                 case 'create'
-                    resp = obj.serverPost('/api/create', struct('cols', 80, 'rows', 24));
+                    createReq = struct('cols', 80, 'rows', 24);
+                    if obj.Shell ~= ""
+                        createReq.shell = obj.Shell;
+                    end
+                    resp = obj.serverPost('/api/create', createReq);
                     if ~isempty(resp) && isfield(resp, 'id')
                         obj.sendToJS(struct('type', 'created', 'id', resp.id));
                     end
@@ -511,6 +539,29 @@ classdef Terminal < handle
                     'foreground',  '#333333', ...
                     'cursor',      '#333333', ...
                     'selectionBackground', '#add6ff');
+            end
+        end
+
+        function validateShell(shell)
+            %VALIDATESHELL Error if the given shell is not found on the system.
+            if isfile(shell)
+                return;  % Absolute path exists.
+            end
+            % Check if it's on PATH.
+            if ispc
+                [st, ~] = system(sprintf('where "%s" >nul 2>&1', shell));
+            else
+                [st, ~] = system(sprintf('which "%s" >/dev/null 2>&1', shell));
+            end
+            if st ~= 0
+                if ispc
+                    common = 'cmd.exe, powershell.exe, pwsh.exe, wsl.exe';
+                else
+                    common = 'bash, zsh, sh, fish';
+                end
+                error('Terminal:ShellNotFound', ...
+                    'Shell "%s" not found.\nCommon shells for this platform: %s', ...
+                    shell, common);
             end
         end
 

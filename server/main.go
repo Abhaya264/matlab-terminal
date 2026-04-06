@@ -27,11 +27,13 @@ func main() {
 		token       string
 		envVars     envFlags
 		idleTimeout time.Duration
+		readyFile   string
 	)
 
 	flag.StringVar(&token, "token", "", "authentication token (required)")
 	flag.Var(&envVars, "env", "environment variable in KEY=VALUE format (repeatable)")
 	flag.DurationVar(&idleTimeout, "idle-timeout", 30*time.Second, "exit after this duration with no connections")
+	flag.StringVar(&readyFile, "ready-file", "", "write PID/PORT to this file on startup (closed immediately)")
 	flag.Parse()
 
 	if token == "" {
@@ -77,6 +79,16 @@ func main() {
 	port := listener.Addr().(*net.TCPAddr).Port
 	fmt.Printf("PID:%d\n", os.Getpid())
 	fmt.Printf("PORT:%d\n", port)
+
+	// Write startup info to a ready file if requested.
+	// The file is written and closed immediately so the reader is never
+	// blocked by a file lock (critical on Windows).
+	if readyFile != "" {
+		info := fmt.Sprintf("PID:%d\nPORT:%d\n", os.Getpid(), port)
+		if err := os.WriteFile(readyFile, []byte(info), 0600); err != nil {
+			log.Printf("warning: failed to write ready file: %v", err)
+		}
+	}
 
 	// Monitor parent PID — exit if parent dies.
 	parentPID := os.Getppid()
