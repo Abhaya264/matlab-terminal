@@ -97,13 +97,33 @@ jobs:
     needs: build-mltbx
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Download .mltbx
         uses: actions/download-artifact@v4
         with:
           name: Terminal.mltbx
 
+      - name: Generate release notes
+        run: |
+          PREV_TAG=$(git tag --sort=-version:refname | grep -v "^${GITHUB_REF_NAME}$" | head -1)
+          if [ -n "$PREV_TAG" ]; then
+            RANGE="${PREV_TAG}..${GITHUB_REF_NAME}"
+          else
+            RANGE="${GITHUB_REF_NAME}"
+          fi
+          {
+            git log --pretty=format:"- %s" "$RANGE"
+            echo ""
+            echo ""
+            echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV_TAG:-$(git rev-list --max-parents=0 HEAD)}...${GITHUB_REF_NAME}"
+          } > release_notes.md
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           files: Terminal.mltbx
+          body_path: release_notes.md
           generate_release_notes: true

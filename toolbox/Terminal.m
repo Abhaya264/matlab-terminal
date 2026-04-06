@@ -44,7 +44,8 @@ classdef Terminal < handle
         BaseURL         % server base URL
         ReadOpts        % cached weboptions for webread
         WriteOpts       % cached weboptions for webwrite
-        OutQueue cell = {}  % queued messages from JS to send to server
+        OutQueue cell = {}  % queued messages from JS to send to server (legacy only)
+        UseEvents logical = false  % true if R2023a+ event API is available
     end
 
     properties (SetAccess = private)
@@ -246,11 +247,17 @@ classdef Terminal < handle
             stop(initTimer);
             delete(initTimer);
 
-            % Now it's safe to set up the data channel and callbacks.
-            obj.HTMLComponent.DataChangedFcn = @(src, ~) obj.onJSMessage(src);
+            obj.UseEvents = ~isMATLABReleaseOlderThan('R2023a');
 
-            % Send init config to JS.
-            obj.HTMLComponent.Data = struct('type', 'init', 'theme', themeConfig);
+            if obj.UseEvents
+                % R2023a+: event-based API — no data loss, no buffering needed.
+                obj.HTMLComponent.HTMLEventReceivedFcn = @(~, event) obj.onHTMLEvent(event);
+                sendEventToHTMLSource(obj.HTMLComponent, 'init', themeConfig);
+            else
+                % Legacy: Data channel (last-write-wins).
+                obj.HTMLComponent.DataChangedFcn = @(src, ~) obj.onJSMessage(src);
+                obj.HTMLComponent.Data = struct('type', 'init', 'theme', themeConfig);
+            end
 
             % Start polling for server output.
             obj.PollTimer = timer( ...
@@ -261,8 +268,17 @@ classdef Terminal < handle
             start(obj.PollTimer);
         end
 
+        function onHTMLEvent(obj, event)
+            %ONHTMLEVENT Handle events from JS via the R2023a+ event API.
+            %   Still queued for the poll timer to avoid concurrent webwrite
+            %   calls, but no JS-side data loss since events don't overwrite.
+            msg = event.HTMLEventData;
+            msg.type = event.HTMLEventName;
+            obj.OutQueue{end+1} = msg;
+        end
+
         function onJSMessage(obj, src)
-            %ONJSMESSAGE Handle messages from JS via the Data channel.
+            %ONJSMESSAGE Handle messages from JS via the legacy Data channel.
             %   Queues messages for the poll timer to process, avoiding
             %   concurrent webread/webwrite calls.
             msg = src.Data;
@@ -277,12 +293,21 @@ classdef Terminal < handle
             try
                 % --- Drain outbound queue (JS -> server) ---
                 if ~isempty(obj.OutQueue)
-                    msg = obj.OutQueue{1};
-                    obj.OutQueue(1) = [];
-                    obj.processJSMessage(msg);
-                    % Return after each message so JS has time to read the
-                    % response before we overwrite Data with poll results.
-                    return;
+                    if obj.UseEvents
+                        % R2023a+: drain all — event API doesn't overwrite.
+                        queue = obj.OutQueue;
+                        obj.OutQueue = {};
+                        for i = 1:numel(queue)
+                            obj.processJSMessage(queue{i});
+                        end
+                    else
+                        % Legacy: one at a time, then return so JS can
+                        % read the response before Data is overwritten.
+                        msg = obj.OutQueue{1};
+                        obj.OutQueue(1) = [];
+                        obj.processJSMessage(msg);
+                        return;
+                    end
                 end
 
                 % --- Poll for server output ---
@@ -370,8 +395,13 @@ classdef Terminal < handle
         end
 
         function sendToJS(obj, msg)
-            %SENDTOJS Send a message to JS by setting HTMLComponent.Data.
-            if ~isempty(obj.HTMLComponent) && isvalid(obj.HTMLComponent)
+            %SENDTOJS Send a message to JS.
+            if isempty(obj.HTMLComponent) || ~isvalid(obj.HTMLComponent)
+                return;
+            end
+            if obj.UseEvents
+                sendEventToHTMLSource(obj.HTMLComponent, msg.type, msg);
+            else
                 obj.HTMLComponent.Data = msg;
             end
         end

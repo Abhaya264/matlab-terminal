@@ -59,16 +59,23 @@
         var containerEl = document.getElementById('terminal-container');
 
         // ---------------------
-        // Communication with MATLAB via Data channel
+        // Communication with MATLAB
         // ---------------------
+        var useEvents = false;  // true if R2023a+ event API is available
+
+        // --- Legacy Data channel (pre-R2023a) ---
         var inputBuffer = {};   // id -> accumulated keystrokes
         var inputFlushTimer = null;
         var msgQueue = [];      // outbound message queue to MATLAB
         var sendTimer = null;
 
         function sendToMATLAB(msg) {
-            // Queue messages and send one at a time with spacing to avoid
-            // Data channel overwrites (last-write-wins).
+            if (useEvents) {
+                // R2023a+: send named event directly — no buffering needed.
+                htmlComp.sendEventToMATLAB(msg.type, msg);
+                return;
+            }
+            // Legacy: queue and space out to avoid Data overwrites.
             msgQueue.push(msg);
             drainQueue();
         }
@@ -76,7 +83,6 @@
         function drainQueue() {
             if (sendTimer || msgQueue.length === 0 || !htmlComp) return;
             htmlComp.Data = msgQueue.shift();
-            // Space out sends to give MATLAB time to read each one.
             if (msgQueue.length > 0) {
                 sendTimer = setTimeout(function () {
                     sendTimer = null;
@@ -86,6 +92,12 @@
         }
 
         function bufferInput(id, data) {
+            if (useEvents) {
+                // R2023a+: send immediately — events are queued, not overwritten.
+                sendToMATLAB({ type: 'input', id: id, data: data });
+                return;
+            }
+            // Legacy: buffer keystrokes to reduce Data writes.
             if (!inputBuffer[id]) {
                 inputBuffer[id] = '';
             }
@@ -170,13 +182,31 @@
             dbg('setup() called by MATLAB');
             htmlComp = component;
 
-            component.addEventListener('DataChanged', function (event) {
-                handleMATLABMessage(event.Data);
-            });
+            // Detect R2023a+ event API.
+            useEvents = typeof component.sendEventToMATLAB === 'function';
+            dbg('useEvents=' + useEvents);
 
-            // Check if data is already set.
-            if (component.Data && component.Data.type) {
-                handleMATLABMessage(component.Data);
+            if (useEvents) {
+                // R2023a+: listen for named events from MATLAB.
+                component.addEventListener('init', function (event) {
+                    handleMATLABMessage({ type: 'init', theme: event.Data });
+                });
+                component.addEventListener('created', function (event) {
+                    handleMATLABMessage(event.Data);
+                });
+                component.addEventListener('batch', function (event) {
+                    handleMATLABMessage(event.Data);
+                });
+            } else {
+                // Legacy: listen for Data channel changes.
+                component.addEventListener('DataChanged', function (event) {
+                    handleMATLABMessage(event.Data);
+                });
+
+                // Check if data is already set.
+                if (component.Data && component.Data.type) {
+                    handleMATLABMessage(component.Data);
+                }
             }
         };
 
