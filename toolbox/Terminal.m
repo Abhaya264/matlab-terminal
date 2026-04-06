@@ -70,9 +70,11 @@ classdef Terminal < handle
 
             obj.Shell = options.Shell;
 
-            % --- Validate shell if specified ---
+            % --- Validate shell if specified, resolve default if not ---
             if obj.Shell ~= ""
                 Terminal.validateShell(obj.Shell);
+            else
+                obj.Shell = Terminal.defaultShell();
             end
 
             % --- Parent container ---
@@ -351,15 +353,9 @@ classdef Terminal < handle
             %PROCESSJSMESSAGE Execute a single queued JS message.
             switch msg.type
                 case 'create'
-                    createReq = struct('cols', 80, 'rows', 24);
-                    if obj.Shell ~= ""
-                        createReq.shell = obj.Shell;
-                    end
+                    createReq = struct('cols', 80, 'rows', 24, 'shell', obj.Shell);
                     resp = obj.serverPost('/api/create', createReq);
                     if ~isempty(resp) && isfield(resp, 'id')
-                        if isfield(resp, 'shell') && obj.Shell == ""
-                            obj.Shell = string(resp.shell);
-                        end
                         obj.sendToJS(struct('type', 'created', 'id', resp.id));
                     end
                 case 'input'
@@ -596,6 +592,21 @@ classdef Terminal < handle
                     'foreground',  '#333333', ...
                     'cursor',      '#333333', ...
                     'selectionBackground', '#add6ff');
+            end
+        end
+
+        function shell = defaultShell()
+            %DEFAULTSHELL Return the system default shell (mirrors server logic).
+            if ispc
+                shell = string(getenv('COMSPEC'));
+                if shell == ""
+                    shell = "cmd.exe";
+                end
+            else
+                shell = string(getenv('SHELL'));
+                if shell == ""
+                    shell = "/bin/sh";
+                end
             end
         end
 
