@@ -46,6 +46,7 @@ classdef Terminal < handle
         WriteOpts       % cached weboptions for webwrite
         OutQueue cell = {}  % queued messages from JS to send to server (legacy only)
         UseEvents logical = false  % true if R2023a+ event API is available
+        ThemeConfig        % cached theme config for re-init on HTML reload
     end
 
     properties (SetAccess = private)
@@ -249,6 +250,7 @@ classdef Terminal < handle
             stop(initTimer);
             delete(initTimer);
 
+            obj.ThemeConfig = themeConfig;
             obj.UseEvents = ~isMATLABReleaseOlderThan('R2023a');
 
             if obj.UseEvents
@@ -352,6 +354,15 @@ classdef Terminal < handle
         function processJSMessage(obj, msg)
             %PROCESSJSMESSAGE Execute a single queued JS message.
             switch msg.type
+                case 'ready'
+                    % HTML page (re)loaded — re-send init so JS can start.
+                    % Send directly (not via sendToJS) to match the format
+                    % that deferredInit uses for the init event.
+                    if obj.UseEvents
+                        sendEventToHTMLSource(obj.HTMLComponent, 'init', obj.ThemeConfig);
+                    else
+                        obj.HTMLComponent.Data = struct('type', 'init', 'theme', obj.ThemeConfig);
+                    end
                 case 'create'
                     createReq = struct('cols', 80, 'rows', 24, 'shell', obj.Shell);
                     resp = obj.serverPost('/api/create', createReq);
@@ -458,30 +469,44 @@ classdef Terminal < handle
             %EXTRACTWEBASSETS Extract web assets from web_assets.mat to a cache dir.
             %   packageToolbox drops .html/.css/.js files, so we bundle them
             %   in a .mat file and extract at runtime.
-            cacheDir = fullfile(prefdir, 'matlab-terminal', 'html');
-            stampFile = fullfile(prefdir, 'matlab-terminal', '.version');
+            cacheRoot = fullfile(prefdir, 'matlab-terminal');
+            cacheDir = fullfile(cacheRoot, 'html');
+            stampFile = fullfile(cacheRoot, '.extracted');
 
-            % Check if already extracted for this version.
-            currentVersion = '0.1.0';
-            if isfile(stampFile) && strcmp(strtrim(fileread(stampFile)), currentVersion)
+            matFile = fullfile(fileparts(mfilename('fullpath')), 'web_assets.mat');
+            if ~isfile(matFile)
+                % Running from source — no .mat file needed.
                 htmlDir = cacheDir;
                 return;
             end
 
-            matFile = fullfile(fileparts(mfilename('fullpath')), 'web_assets.mat');
-            if ~isfile(matFile)
-                error('Terminal:NoAssets', ...
-                    'web_assets.mat not found at:\n  %s\nRe-install the toolbox.', matFile);
+            % Re-extract if the .mat file is newer than our stamp,
+            % meaning a new toolbox version was installed.
+            matInfo = dir(matFile);
+            needsExtract = true;
+            if isfile(stampFile)
+                stampInfo = dir(stampFile);
+                needsExtract = matInfo.datenum > stampInfo.datenum;
             end
 
-            cacheRoot = fullfile(prefdir, 'matlab-terminal');
+            if ~needsExtract
+                htmlDir = cacheDir;
+                return;
+            end
+
+            % Wipe old cache entirely before extracting.
+            if isfolder(cacheRoot)
+                fprintf('Clearing old Terminal cache at:\n  %s\n', cacheRoot);
+                rmdir(cacheRoot, 's');
+            end
+
             fprintf('Extracting Terminal assets to:\n  %s\n', cacheRoot);
 
             S = load(matFile, 'assets');
             fields = fieldnames(S.assets);
             for i = 1:numel(fields)
                 entry = S.assets.(fields{i});
-                dst = fullfile(prefdir, 'matlab-terminal', entry.path);
+                dst = fullfile(cacheRoot, entry.path);
                 dstDir = fileparts(dst);
                 if ~isfolder(dstDir)
                     mkdir(dstDir);
@@ -495,9 +520,8 @@ classdef Terminal < handle
                 end
             end
 
-            % Write version stamp.
+            % Touch stamp file so we know this extraction is current.
             fid = fopen(stampFile, 'w');
-            fprintf(fid, '%s', currentVersion);
             fclose(fid);
 
             htmlDir = cacheDir;

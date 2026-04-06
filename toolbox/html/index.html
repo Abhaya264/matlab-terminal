@@ -182,6 +182,9 @@
             dbg('setup() called by MATLAB');
             htmlComp = component;
 
+            // Reset state in case this is a reload (undock/move).
+            initialized = false;
+
             // Detect R2023a+ event API.
             useEvents = typeof component.sendEventToMATLAB === 'function';
             dbg('useEvents=' + useEvents);
@@ -202,12 +205,10 @@
                 component.addEventListener('DataChanged', function (event) {
                     handleMATLABMessage(event.Data);
                 });
-
-                // Check if data is already set.
-                if (component.Data && component.Data.type) {
-                    handleMATLABMessage(component.Data);
-                }
             }
+
+            // Tell MATLAB we're ready — triggers (re-)init.
+            sendToMATLAB({ type: 'ready' });
         };
 
         // ---------------------
