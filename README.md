@@ -24,8 +24,9 @@ MATLAB Terminal brings the system shell directly into the MATLAB Desktop, so you
 - **Configurable shell** — Choose your shell via `Terminal(Shell="zsh")`. Defaults to `$SHELL` on Unix, `%COMSPEC%` on Windows.
 - **Tabbed interface** — Open multiple terminal sessions in a single panel. Create, close, and switch tabs.
 - **Docked in MATLAB Desktop** — The terminal panel docks into the MATLAB layout like any other tool window. Undock to a floating window with `WindowStyle="normal"`.
-- **MATLAB theme integration** — Automatically inherits your MATLAB theme (light or dark), code font family, and font size.
+- **MATLAB theme integration** — Automatically inherits your MATLAB theme (light or dark), code font family, and font size. Theme is preserved when undocking or moving panels.
 - **Copy and paste** — Ctrl+Shift+C to copy selection, Ctrl+Shift+V to paste.
+- **Instance management** — `Terminal.list()` returns handles to all running terminals, `Terminal.closeAll()` closes them all.
 - **Auto-cleanup** — Closing the last tab closes the window. The server process is killed when the terminal is deleted or MATLAB exits. Idle timeout as a safety net.
 - **MATLAB environment variables** — Terminal sessions have `MATLAB_PID` and `MATLAB_ROOT` set, allowing CLI tools to discover the running MATLAB instance.
 - **R2023a+ event API** — On MATLAB R2023a and later, uses the event-based `sendEventToHTMLSource`/`HTMLEventReceivedFcn` API for reliable keystroke delivery with no data loss. Older releases fall back to the Data channel with buffering.
@@ -64,7 +65,13 @@ t = Terminal(Shell="powershell.exe"); % Windows
 % Query the shell in use
 t.Shell
 
-% Close the terminal
+% List all running terminals
+Terminal.list()
+
+% Close all running terminals
+Terminal.closeAll()
+
+% Close a single terminal
 delete(t);
 ```
 

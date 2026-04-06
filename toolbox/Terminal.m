@@ -23,6 +23,8 @@ classdef Terminal < handle
     %                                  "wsl.exe"
     %
     %   Static methods:
+    %     Terminal.list()     — return handles to all running terminals
+    %     Terminal.closeAll() — close all running terminals
     %     Terminal.install()  — download the server binary for this platform
     %     Terminal.update()   — re-download the server binary
     %
@@ -220,6 +222,9 @@ classdef Terminal < handle
             % Clean up when figure is closed.
             obj.ParentFigure.CloseRequestFcn = @(~,~) delete(obj);
 
+            % Register this instance.
+            Terminal.registry('add', obj);
+
             % Use a one-shot timer to initialize AFTER the constructor returns.
             % This prevents DataChangedFcn from firing during construction.
             initTimer = timer('StartDelay', 1.5, ...
@@ -229,6 +234,7 @@ classdef Terminal < handle
 
         function delete(obj)
             %DELETE Clean up: stop timer, kill server, close figure.
+            Terminal.registry('remove', obj);
             if ~isempty(obj.PollTimer) && isvalid(obj.PollTimer)
                 stop(obj.PollTimer);
                 delete(obj.PollTimer);
@@ -415,6 +421,25 @@ classdef Terminal < handle
     end
 
     methods (Static)
+        function terminals = list()
+            %LIST Return handles to all running Terminal instances.
+            %
+            %   terminals = Terminal.list()
+            %
+            %   Returns a (possibly empty) array of Terminal handles.
+            terminals = Terminal.registry('get');
+        end
+
+        function closeAll()
+            %CLOSEALL Close all running Terminal instances.
+            %
+            %   Terminal.closeAll()
+            terminals = Terminal.list();
+            for i = 1:numel(terminals)
+                delete(terminals(i));
+            end
+        end
+
         function install()
             %INSTALL Download the server binary for the current platform.
             arch = computer('arch');
@@ -465,6 +490,26 @@ classdef Terminal < handle
     end
 
     methods (Static, Access = private)
+        function result = registry(action, obj)
+            %REGISTRY Persistent store for tracking Terminal instances.
+            persistent instances
+            if isempty(instances)
+                instances = Terminal.empty;
+            end
+            switch action
+                case 'add'
+                    instances(end+1) = obj;
+                case 'remove'
+                    instances(instances == obj) = [];
+                case 'get'
+                    % Prune deleted handles before returning.
+                    instances(~isvalid(instances)) = [];
+                    result = instances;
+                    return;
+            end
+            result = Terminal.empty;
+        end
+
         function htmlDir = extractWebAssets()
             %EXTRACTWEBASSETS Extract web assets from web_assets.mat to a cache dir.
             %   packageToolbox drops .html/.css/.js files, so we bundle them

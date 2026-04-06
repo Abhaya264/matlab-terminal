@@ -233,6 +233,18 @@ PTY output → Go server buffers → GET /api/poll (100ms)
 
 On the legacy path, only one outbound message is processed per poll tick, giving JS time to read the response before Data is overwritten by poll results.
 
+### HTML Reload on Undock/Move
+
+When the terminal panel is undocked or moved, MATLAB reloads the HTML page inside `uihtml`, resetting all JS state. To handle this:
+
+1. JS sends a `ready` event to MATLAB whenever `setup()` is called
+2. MATLAB responds by re-sending `init` with the cached theme config
+3. JS reinitializes xterm.js and creates a new terminal tab (existing server sessions continue independently)
+
+### Instance Registry
+
+A persistent variable inside a private static method tracks all live `Terminal` instances. `Terminal.list()` returns handles (auto-pruning deleted ones), `Terminal.closeAll()` deletes them all. Instances register on construction and deregister on `delete`.
+
 ## 8. Known Limitations
 
 - **Character swallowing on pre-R2023a**: The legacy Data channel is property-based (last-write-wins). Fast typing can lose characters, especially in matlab-proxy. On R2023a+, the event-based API eliminates this issue.
