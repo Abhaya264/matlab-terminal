@@ -569,11 +569,13 @@ classdef Terminal < handle
                 fontSize = 14;
             end
 
+            isDark = false;
             try
-                s = settings;
-                isDark = s.matlab.editor.colortheme.ActiveValue ~= "light";
+                % Check default figure background luminance (no side effects).
+                c = get(groot, 'defaultFigureColor');
+                luminance = 0.2126*c(1) + 0.7152*c(2) + 0.0722*c(3);
+                isDark = luminance < 0.5;
             catch
-                isDark = false;
             end
 
             if isDark
