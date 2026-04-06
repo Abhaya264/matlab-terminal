@@ -106,15 +106,16 @@ classdef Terminal < handle
             args = sprintf('--token "%s" --env "MATLAB_PID=%s" --env "MATLAB_ROOT=%s" --ready-file "%s"', ...
                 obj.AuthToken, matlabPid, matlabRoot, readyFile);
 
+            logFile = [tempname, '.log'];
             if ispc
                 % Windows: use a temp batch file to run in background.
                 batFile = [tempname, '.bat'];
                 fid = fopen(batFile, 'w');
-                fprintf(fid, '@"%s" %s >nul 2>&1\n', obj.ServerBinary, args);
+                fprintf(fid, '@"%s" %s > "%s" 2>&1\n', obj.ServerBinary, args, logFile);
                 fclose(fid);
                 system(sprintf('start "" /b cmd /c call "%s"', batFile));
             else
-                system(sprintf('"%s" %s >/dev/null 2>&1 &', obj.ServerBinary, args));
+                system(sprintf('"%s" %s > "%s" 2>&1 &', obj.ServerBinary, args, logFile));
             end
 
             % Wait for the server to write PID and PORT to the ready file.
@@ -151,9 +152,27 @@ classdef Terminal < handle
                 if ~isempty(serverPid)
                     Terminal.killProcess(serverPid);
                 end
-                error('Terminal:NoPort', ...
-                    'Server did not report a port within %d seconds.', maxWait);
+                % Read server log for diagnostics.
+                serverLog = '';
+                if isfile(logFile)
+                    try
+                        serverLog = fileread(logFile);
+                    catch
+                    end
+                    delete(logFile);
+                end
+                if serverLog ~= ""
+                    error('Terminal:NoPort', ...
+                        'Server did not report a port within %d seconds.\nServer output:\n%s', ...
+                        maxWait, serverLog);
+                else
+                    error('Terminal:NoPort', ...
+                        'Server did not report a port within %d seconds.', maxWait);
+                end
             end
+            % Clean up log file on success (server keeps running).
+            % Keep it around — it's useful for debugging if something
+            % goes wrong later. It will be cleaned up by the OS.
 
             obj.ServerProcess = struct('pid', serverPid, 'port', port);
             obj.BaseURL = sprintf('http://127.0.0.1:%d', port);
@@ -257,10 +276,13 @@ classdef Terminal < handle
             %POLLOUTPUT Process queued JS messages, then poll for output.
             try
                 % --- Drain outbound queue (JS -> server) ---
-                while ~isempty(obj.OutQueue)
+                if ~isempty(obj.OutQueue)
                     msg = obj.OutQueue{1};
                     obj.OutQueue(1) = [];
                     obj.processJSMessage(msg);
+                    % Return after each message so JS has time to read the
+                    % response before we overwrite Data with poll results.
+                    return;
                 end
 
                 % --- Poll for server output ---
@@ -310,6 +332,9 @@ classdef Terminal < handle
                     end
                     resp = obj.serverPost('/api/create', createReq);
                     if ~isempty(resp) && isfield(resp, 'id')
+                        if isfield(resp, 'shell') && obj.Shell == ""
+                            obj.Shell = string(resp.shell);
+                        end
                         obj.sendToJS(struct('type', 'created', 'id', resp.id));
                     end
                 case 'input'

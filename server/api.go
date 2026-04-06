@@ -103,7 +103,7 @@ func (h *APIHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		req.Rows = 24
 	}
 
-	id, err := h.manager.Create(req.Shell, req.Cols, req.Rows,
+	result, err := h.manager.Create(req.Shell, req.Cols, req.Rows,
 		func(sessionID string, data []byte) {
 			h.enqueue(outputMessage{
 				Type: "output",
@@ -125,7 +125,7 @@ func (h *APIHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"id": id})
+	json.NewEncoder(w).Encode(map[string]string{"id": result.ID, "shell": result.Shell})
 }
 
 // HandleInput sends keystrokes to a session.

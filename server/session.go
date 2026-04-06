@@ -44,7 +44,13 @@ func NewSessionManager(defaultShell string) *SessionManager {
 
 // Create starts a new PTY session. It calls onOutput for stdout data and
 // onExit when the process terminates.
-func (m *SessionManager) Create(shell string, cols, rows uint16, onOutput OutputCallback, onExit ExitCallback) (string, error) {
+// CreateResult holds the result of creating a new session.
+type CreateResult struct {
+	ID    string
+	Shell string
+}
+
+func (m *SessionManager) Create(shell string, cols, rows uint16, onOutput OutputCallback, onExit ExitCallback) (CreateResult, error) {
 	if shell == "" {
 		shell = m.defaultShell
 	}
@@ -56,7 +62,7 @@ func (m *SessionManager) Create(shell string, cols, rows uint16, onOutput Output
 
 	p, err := startPTY(shell, cols, rows)
 	if err != nil {
-		return "", fmt.Errorf("failed to start pty: %w", err)
+		return CreateResult{}, fmt.Errorf("failed to start pty: %w", err)
 	}
 
 	sess := &Session{
@@ -96,7 +102,7 @@ func (m *SessionManager) Create(shell string, cols, rows uint16, onOutput Output
 		onExit(id, exitCode)
 	}()
 
-	return id, nil
+	return CreateResult{ID: id, Shell: shell}, nil
 }
 
 // Write sends input data to a session's PTY.
