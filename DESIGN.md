@@ -24,11 +24,11 @@ Embed a fully functional terminal emulator into the MATLAB Desktop, enabling use
 | F3 | Create, close, and switch between terminal tabs | Must | Done |
 | F4 | Terminal panel can be docked into the MATLAB desktop layout | Must | Done |
 | F5 | Terminal inherits MATLAB theme (light/dark), code font, and font size from MATLAB settings | Must | Done |
-| F6 | Works on Windows, macOS, and Linux | Must | Linux only |
+| F6 | Works on Windows, macOS, and Linux | Must | Done |
 | F7 | Supports interactive CLI tools (Claude Code, vim, htop, ssh, etc.) | Must | Done |
 | F8 | Terminal resizes correctly when the panel is resized | Must | Done |
 | F9 | Copy/paste support with Ctrl+Shift+C / Ctrl+Shift+V | Should | Done |
-| F10 | Configurable default shell (e.g., bash, zsh, PowerShell, cmd) | Should | Not started |
+| F10 | Configurable default shell (e.g., bash, zsh, PowerShell, cmd) | Should | Done |
 | F11 | Terminal remembers tab state within a MATLAB session | Should | Not started |
 
 ### Non-Functional Requirements
@@ -89,20 +89,25 @@ Embed a fully functional terminal emulator into the MATLAB Desktop, enabling use
 
 **Rationale**:
 - Go compiles to a single static binary per platform — no runtime dependencies
-- Excellent cross-platform PTY support via `creack/pty`
+- Cross-platform PTY support: `creack/pty` on Unix, `conpty` (ConPTY) on Windows
 - Low memory footprint and fast startup
-- Easy to cross-compile for all target platforms
+- Easy to cross-compile for all target platforms via Go build tags
 
 ### Decision 3: HTTP polling (not WebSocket)
-**Choice**: MATLAB polls the Go server via HTTP at 100ms intervals. JS communicates with MATLAB via the `uihtml` Data channel.
+**Choice**: MATLAB polls the Go server via HTTP at 100ms intervals. JS communicates with MATLAB via the `uihtml` Data channel (pre-R2023a) or the event-based API (R2023a+).
 
 **Rationale**:
 - uihtml serves pages over HTTPS, blocking `ws://` connections (mixed content policy)
 - `wss://` with the server's self-signed cert also fails
 - HTTP polling via MATLAB's `webread`/`webwrite` avoids these issues entirely
-- The Data channel between JS and MATLAB is property-based (last-write-wins), so a JS-side message queue with 50ms spacing prevents message loss
 
-**Critical constraint**: MATLAB cannot handle concurrent `webread`/`webwrite` calls. Events (timer callbacks, DataChangedFcn) are processed during web calls, causing re-entrant requests. All HTTP calls are serialized through a single poll timer with an outbound message queue.
+**MATLAB ↔ JS communication (branched)**:
+- **R2023a+**: Uses `sendEventToHTMLSource`/`HTMLEventReceivedFcn` and `sendEventToMATLAB`/`addEventListener`. Events are queued by the framework, so no data is lost even during fast typing.
+- **Pre-R2023a**: Uses the Data channel (last-write-wins). JS-side input buffering (80ms) and message queue (50ms spacing) mitigate data loss. MATLAB processes one outbound message per poll tick to prevent response overwrites.
+
+Detection: MATLAB uses `isMATLABReleaseOlderThan('R2023a')`, JS uses `typeof component.sendEventToMATLAB === 'function'`.
+
+**Critical constraint**: MATLAB cannot handle concurrent `webread`/`webwrite` calls. Events (timer callbacks, DataChangedFcn/HTMLEventReceivedFcn) are processed during web calls, causing re-entrant requests. All HTTP calls are serialized through a single poll timer with an outbound message queue.
 
 ### Decision 4: MATLAB manages the server lifecycle
 **Choice**: The MATLAB `Terminal` class starts the Go binary on construction and kills it on cleanup/deletion.
@@ -158,6 +163,11 @@ matlab-terminal/
 │   ├── main.go                     # Entry point, CLI flags, HTTP routes
 │   ├── api.go                      # HTTP API handlers
 │   ├── session.go                  # PTY session lifecycle
+│   ├── pty.go                      # Platform-agnostic PTY interface
+│   ├── pty_unix.go                 # Unix PTY implementation (creack/pty)
+│   ├── pty_windows.go              # Windows PTY implementation (ConPTY)
+│   ├── shell_unix.go               # Default shell detection (Unix)
+│   ├── shell_windows.go            # Default shell detection (Windows)
 │   ├── auth.go                     # Token validation middleware
 │   └── go.mod / go.sum             # Go module dependencies
 ├── build/                          # Build tooling (not shipped in .mltbx)
@@ -165,7 +175,10 @@ matlab-terminal/
 │   ├── package.m                   # Builds .mltbx (calls build_assets.m)
 │   └── setup_xterm.sh              # Downloads and vendors xterm.js
 ├── dist/                           # Build output (gitignored)
-│   ├── matlab-terminal-server      # Compiled Go binary
+│   ├── glnxa64/                    # Linux binary
+│   ├── maci64/                     # macOS Intel binary
+│   ├── maca64/                     # macOS Apple Silicon binary
+│   ├── win64/                      # Windows binary
 │   └── Terminal.mltbx              # Installable toolbox package
 └── DESIGN.md                       # This document
 ```
@@ -178,7 +191,7 @@ All communication between MATLAB and the Go server uses JSON over HTTP.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/api/create` | Create a new PTY session (`cols`, `rows`) → `{id}` |
+| POST | `/api/create` | Create a new PTY session (`shell`, `cols`, `rows`) → `{id, shell}` |
 | POST | `/api/input` | Send keystrokes to a session (`id`, `data`) |
 | POST | `/api/resize` | Resize a session's PTY (`id`, `cols`, `rows`) |
 | POST | `/api/close` | Close a session (`id`) |
@@ -194,20 +207,35 @@ All communication between MATLAB and the Go server uses JSON over HTTP.
 
 ## 7. Data Flow
 
+### R2023a+ (Event API)
+
+```
+User types → xterm.js onData → sendEventToMATLAB('input', ...)
+  → MATLAB onHTMLEvent → OutQueue
+  → Poll timer drains all → POST /api/input → Go server → PTY
+
+PTY output → Go server buffers → GET /api/poll (100ms)
+  → MATLAB pollOutput → sendEventToHTMLSource('batch', ...)
+  → JS handleMATLABMessage → xterm.js terminal.write()
+```
+
+### Pre-R2023a (Legacy Data Channel)
+
 ```
 User types → xterm.js onData → JS input buffer (80ms)
   → Data channel → MATLAB onJSMessage → OutQueue
-  → Poll timer drains queue → POST /api/input → Go server → PTY
+  → Poll timer drains one → POST /api/input → Go server → PTY
 
 PTY output → Go server buffers → GET /api/poll (100ms)
   → MATLAB pollOutput → Data channel → JS handleMATLABMessage
   → xterm.js terminal.write()
 ```
 
+On the legacy path, only one outbound message is processed per poll tick, giving JS time to read the response before Data is overwritten by poll results.
+
 ## 8. Known Limitations
 
-- **Character swallowing**: The Data channel is property-based (last-write-wins). Fast typing can lose characters, especially in matlab-proxy. Mitigation: JS-side input buffering (80ms) and message queue (50ms spacing). Future fix: migrate to `sendEventToMATLAB`/`sendEventToHTMLSource` (R2023a+).
+- **Character swallowing on pre-R2023a**: The legacy Data channel is property-based (last-write-wins). Fast typing can lose characters, especially in matlab-proxy. On R2023a+, the event-based API eliminates this issue.
 - **Line wrapping in matlab-proxy**: Long lines may overwrite from the start instead of wrapping correctly.
 - **Apps tab icon**: `AppGalleryFiles` in `ToolboxOptions` does not reliably register apps in the MATLAB Apps toolstrip.
-- **Platform support**: Currently Linux only. macOS and Windows support requires cross-compilation and testing.
 - **uihtml caching**: MATLAB caches HTML/CSS files aggressively. Changes require a MATLAB restart to take effect.

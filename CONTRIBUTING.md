@@ -35,10 +35,18 @@ go version
 
 ```bash
 cd server/
-go build -ldflags "-s -w" -o ../dist/matlab-terminal-server .
 ```
 
-This produces a single binary in `dist/` (gitignored). The `-ldflags "-s -w"` flag strips debug symbols to reduce size.
+Build for your platform into `dist/<arch>/`:
+
+| Platform | Build command |
+|----------|---------------|
+| Linux x86_64 | `mkdir -p ../dist/glnxa64 && go build -ldflags "-s -w" -o ../dist/glnxa64/matlab-terminal-server .` |
+| macOS Intel | `mkdir -p ../dist/maci64 && GOARCH=amd64 go build -ldflags "-s -w" -o ../dist/maci64/matlab-terminal-server .` |
+| macOS Apple Silicon | `mkdir -p ../dist/maca64 && GOARCH=arm64 go build -ldflags "-s -w" -o ../dist/maca64/matlab-terminal-server .` |
+| Windows x86_64 | `mkdir -p ../dist/win64 && GOOS=windows GOARCH=amd64 go build -ldflags "-s -w" -o ../dist/win64/matlab-terminal-server.exe .` |
+
+The `-ldflags "-s -w"` flag strips debug symbols to reduce size.
 
 ### Toolbox package
 
@@ -55,8 +63,8 @@ This bundles web assets and the Go binary into `dist/Terminal.mltbx`.
 No packaging needed during development:
 
 ```bash
-# 1. Build the server
-cd server && go build -o ../dist/matlab-terminal-server . && cd ..
+# 1. Build the server (example for Linux)
+cd server && mkdir -p ../dist/glnxa64 && go build -o ../dist/glnxa64/matlab-terminal-server . && cd ..
 ```
 
 ```matlab
@@ -79,6 +87,11 @@ server/                             Go server source
   main.go                           Entry point, CLI flags, HTTP routes
   api.go                            HTTP API handlers
   session.go                        PTY session lifecycle
+  pty.go                            Platform-agnostic PTY interface
+  pty_unix.go                       Unix PTY (creack/pty)
+  pty_windows.go                    Windows PTY (ConPTY)
+  shell_unix.go                     Default shell detection (Unix)
+  shell_windows.go                  Default shell detection (Windows)
   auth.go                           Token validation middleware
 build/                              Build tooling (not shipped)
   build_assets.m                    Bundles web assets + binary into .mat
