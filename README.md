@@ -278,6 +278,7 @@ The resulting `.mltbx` is a single cross-platform artifact. At install time, `Te
 - **Docked mode not available on all releases** — `uifigure` `WindowStyle='docked'` is not supported on some releases (e.g., R2024a). The terminal automatically falls back to a normal floating window.
 - **Character swallowing on pre-R2023a** — The legacy Data channel is property-based (last-write-wins). Fast typing can lose characters, especially in matlab-proxy. On R2023a+, the event-based API eliminates this issue.
 - **Line wrapping in matlab-proxy** — Long lines may overwrite from the start instead of wrapping correctly.
+- **Terminal unresponsive during computation** — The terminal relies on MATLAB's main thread for polling the server and updating the UI. When MATLAB is busy executing code, the terminal freezes until MATLAB returns to idle. This is a fundamental constraint of `uihtml` — it cannot load URLs, so JS cannot communicate directly with the server via WebSocket, and all I/O must be routed through MATLAB.
 - **uihtml caching** — MATLAB caches HTML/CSS files aggressively. Changes to the frontend require a MATLAB restart to take effect.
 
 ## License
