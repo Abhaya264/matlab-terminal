@@ -24,7 +24,7 @@ MATLAB Terminal brings the system shell directly into the MATLAB Desktop, so you
 - **Configurable shell** — Choose your shell via `Terminal(Shell="zsh")`. Defaults to `$SHELL` on Unix, `%COMSPEC%` on Windows.
 - **Tabbed interface** — Open multiple terminal sessions in a single panel. Create, close, and switch tabs.
 - **Docked in MATLAB Desktop** — The terminal panel docks into the MATLAB layout like any other tool window. Undock to a floating window with `WindowStyle="normal"`.
-- **MATLAB theme integration** — Automatically inherits your MATLAB theme (light or dark), code font family, and font size. Theme is preserved when undocking or moving panels.
+- **MATLAB theme integration** — Automatically inherits your MATLAB theme (light or dark), code font family, and font size. Switching themes in MATLAB updates all open terminals in real time.
 - **Copy and paste** — Ctrl+Shift+C to copy selection, Ctrl+Shift+V to paste.
 - **Instance management** — `Terminal.list()` returns handles to all running terminals, `Terminal.closeAll()` closes them all.
 - **Self-updating** — `Terminal.update()` checks GitHub for new releases and walks you through the upgrade interactively.
@@ -80,7 +80,7 @@ Terminal.closeAll()
 % Close a single terminal
 delete(t);
 
-% Check for updates
+% Check for updates and install the latest version from GitHub
 Terminal.update()
 ```
 
@@ -104,11 +104,17 @@ The exact minimum MATLAB release is yet to be determined. The following features
 | `uihtml` | R2019b |
 | `arguments` blocks | R2019b |
 | `uifigure` `WindowStyle='modal'` | R2020b |
-| `uifigure` `WindowStyle='docked'` | TBD |
-| `settings().matlab.editor.colortheme` | TBD |
 | `isMATLABReleaseOlderThan` | R2020b |
 | `sendEventToHTMLSource` / `HTMLEventReceivedFcn` (optional, improves typing) | R2023a |
 | `matlab.addons.toolbox.ToolboxOptions` (build-time only) | R2022a |
+
+**Release-dependent behavior:**
+
+| Behavior | Releases |
+|----------|----------|
+| Docked window style | Supported on releases where `uifigure` accepts `WindowStyle='docked'`. On older releases (e.g., R2024a), the terminal falls back to a normal floating window with a warning. |
+| Reliable keystroke delivery | R2023a+ uses the event-based API with no data loss. Older releases use the Data channel with buffering (fast typing may lose characters). |
+| Live theme switching | Requires `groot` `DefaultFigureColor` listener support. On older releases, restart the terminal to pick up theme changes. |
 
 ### Updating
 
@@ -137,8 +143,7 @@ matlab-terminal/
 │   ├── TerminalVersion.m          # Version string (stamped at build time)
 │   ├── openTerminal.m              # Launcher for Apps tab
 │   ├── doc/                        # Documentation
-│   │   ├── GettingStarted.m       # Getting Started source (diffable)
-│   │   └── GettingStarted.mlx     # Getting Started live script (shown on install)
+│   │   └── GettingStarted.m       # Getting Started guide (shown on install)
 │   ├── images/                     # Toolbox icon
 │   │   └── matlab-terminal.jpeg
 │   └── html/                       # Web frontend
@@ -270,6 +275,7 @@ The resulting `.mltbx` is a single cross-platform artifact. At install time, `Te
 - **Session persistence** — Terminal sessions are not preserved across MATLAB restarts.
 
 ### Known issues
+- **Docked mode not available on all releases** — `uifigure` `WindowStyle='docked'` is not supported on some releases (e.g., R2024a). The terminal automatically falls back to a normal floating window.
 - **Character swallowing on pre-R2023a** — The legacy Data channel is property-based (last-write-wins). Fast typing can lose characters, especially in matlab-proxy. On R2023a+, the event-based API eliminates this issue.
 - **Line wrapping in matlab-proxy** — Long lines may overwrite from the start instead of wrapping correctly.
 - **uihtml caching** — MATLAB caches HTML/CSS files aggressively. Changes to the frontend require a MATLAB restart to take effect.

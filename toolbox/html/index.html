@@ -138,6 +138,23 @@
                 case 'exited':
                     markTabExited(data.id, data.exitCode);
                     break;
+                case 'theme':
+                    // Live theme update (user switched MATLAB theme).
+                    var newTheme = data.theme;
+                    config = { theme: newTheme };
+                    applyTheme(newTheme);
+                    var xtTheme = buildXtermTheme(newTheme);
+                    var ids = Object.keys(tabs);
+                    for (var t = 0; t < ids.length; t++) {
+                        var tab = tabs[ids[t]];
+                        if (tab.term) {
+                            tab.term.options.theme = xtTheme;
+                            tab.term.options.fontFamily = newTheme.fontFamily || 'Consolas, monospace';
+                            tab.term.options.fontSize = newTheme.fontSize || 14;
+                            if (tab.fitAddon) tab.fitAddon.fit();
+                        }
+                    }
+                    break;
                 case 'batch':
                     // Process a batch of messages from MATLAB polling.
                     var msgs = data.messages;
@@ -198,6 +215,9 @@
                     handleMATLABMessage(event.Data);
                 });
                 component.addEventListener('batch', function (event) {
+                    handleMATLABMessage(event.Data);
+                });
+                component.addEventListener('theme', function (event) {
                     handleMATLABMessage(event.Data);
                 });
             } else {

@@ -50,6 +50,7 @@ classdef Terminal < handle
         OutQueue cell = {}  % queued messages from JS to send to server (legacy only)
         UseEvents logical = false  % true if R2023a+ event API is available
         ThemeConfig        % cached theme config for re-init on HTML reload
+        ThemeListener      % listener for groot theme changes
     end
 
     properties (SetAccess = private)
@@ -86,8 +87,15 @@ classdef Terminal < handle
             % --- Parent container ---
             if isempty(parent)
                 parent = uifigure('Name', options.Name, ...
-                    'Position', [100 100 800 500], ...
-                    'WindowStyle', options.WindowStyle);
+                    'Position', [100 100 800 500]);
+                try
+                    parent.WindowStyle = options.WindowStyle;
+                catch
+                    if options.WindowStyle == "docked"
+                        warning('Terminal:DockNotSupported', ...
+                            'Docked window style is not supported in this MATLAB release. Using normal window.');
+                    end
+                end
             end
             obj.ParentFigure = parent;
 
@@ -243,6 +251,7 @@ classdef Terminal < handle
                 stop(obj.PollTimer);
                 delete(obj.PollTimer);
             end
+            delete(obj.ThemeListener);
             if ~isempty(obj.ServerProcess) && isstruct(obj.ServerProcess) ...
                     && isfield(obj.ServerProcess, 'pid') && ~isnan(obj.ServerProcess.pid)
                 Terminal.killProcess(obj.ServerProcess.pid);
@@ -273,6 +282,15 @@ classdef Terminal < handle
                 obj.HTMLComponent.Data = struct('type', 'init', 'theme', themeConfig);
             end
 
+            % Listen for theme changes (light/dark switch).
+            try
+                obj.ThemeListener = addlistener(groot, ...
+                    'DefaultFigureColor', 'PostSet', ...
+                    @(~,~) obj.onThemeChanged());
+            catch
+                % Listener not supported on this release — ignore.
+            end
+
             % Start polling for server output.
             obj.PollTimer = timer( ...
                 'ExecutionMode', 'fixedSpacing', ...
@@ -280,6 +298,14 @@ classdef Terminal < handle
                 'TimerFcn', @(~,~) obj.pollOutput(), ...
                 'ErrorFcn', @(~,~) []);
             start(obj.PollTimer);
+        end
+
+        function onThemeChanged(obj)
+            %ONTHEMECHANGED Rebuild theme config and push to JS.
+            newConfig = Terminal.buildThemeConfig();
+            obj.ThemeConfig = newConfig;
+            obj.sendToJS(struct('type', 'theme', ...
+                'theme', newConfig));
         end
 
         function onHTMLEvent(obj, event)
@@ -686,6 +712,18 @@ classdef Terminal < handle
                 fontSize = s.matlab.fonts.codefont.Size.ActiveValue;
             catch
                 fontSize = 14;
+            end
+
+            % On Windows, MATLAB reports font size in points but xterm.js
+            % expects CSS pixels. Convert using the screen DPI to account
+            % for the pt-to-px conversion and OS display scaling.
+            if ispc
+                try
+                    screenPPI = get(groot, 'ScreenPixelsPerInch');
+                catch
+                    screenPPI = 96;
+                end
+                fontSize = round(fontSize * screenPPI / 72);
             end
 
             isDark = false;

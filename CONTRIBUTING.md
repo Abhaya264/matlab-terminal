@@ -83,8 +83,7 @@ toolbox/                            Toolbox source (shipped in .mltbx)
   TerminalVersion.m                 Version string (stamped at build time)
   openTerminal.m                    Launcher for Apps tab
   doc/                              Documentation
-    GettingStarted.m                Getting Started source (diffable)
-    GettingStarted.mlx              Getting Started live script (shown on install)
+    GettingStarted.m                Getting Started guide (shown on install)
   images/                           Toolbox icon
     matlab-terminal.jpeg
   html/                             Web frontend (xterm.js, inline JS)

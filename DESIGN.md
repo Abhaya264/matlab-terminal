@@ -155,8 +155,7 @@ matlab-terminal/
 │   ├── openTerminal.m              # Simple launcher for Apps tab
 │   ├── web_assets.mat              # Bundled HTML/CSS/JS + binary (generated)
 │   ├── doc/                        # Documentation
-│   │   ├── GettingStarted.m       # Getting Started source (diffable)
-│   │   └── GettingStarted.mlx     # Getting Started live script (shown on install)
+│   │   └── GettingStarted.m       # Getting Started guide (shown on install)
 │   ├── images/                     # Toolbox icon
 │   │   └── matlab-terminal.jpeg
 │   └── html/                       # Web assets (used in dev, bundled for release)
@@ -251,7 +250,7 @@ A persistent variable inside a private static method tracks all live `Terminal` 
 
 ## 8. Known Limitations
 
+- **Docked mode not available on all releases**: `uifigure` `WindowStyle='docked'` is not supported on some releases (e.g., R2024a). The constructor catches the error and falls back to a normal window with a warning.
 - **Character swallowing on pre-R2023a**: The legacy Data channel is property-based (last-write-wins). Fast typing can lose characters, especially in matlab-proxy. On R2023a+, the event-based API eliminates this issue.
 - **Line wrapping in matlab-proxy**: Long lines may overwrite from the start instead of wrapping correctly.
-- **Apps tab icon**: `AppGalleryFiles` in `ToolboxOptions` does not reliably register apps in the MATLAB Apps toolstrip.
 - **uihtml caching**: MATLAB caches HTML/CSS files aggressively. Changes require a MATLAB restart to take effect.
