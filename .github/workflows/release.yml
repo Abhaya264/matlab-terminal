@@ -85,7 +85,7 @@ jobs:
       - name: Build .mltbx
         uses: matlab-actions/run-command@v2
         with:
-          command: run('build/package.m')
+          command: addpath('build'); package("${{ github.ref_name }}")
 
       - uses: actions/upload-artifact@v4
         with:

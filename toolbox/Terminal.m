@@ -23,10 +23,10 @@ classdef Terminal < handle
     %                                  "wsl.exe"
     %
     %   Static methods:
+    %     Terminal.version()  — return the installed toolbox version string
     %     Terminal.list()     — return handles to all running terminals
     %     Terminal.closeAll() — close all running terminals
-    %     Terminal.install()  — download the server binary for this platform
-    %     Terminal.update()   — re-download the server binary
+    %     Terminal.update()   — check for and install the latest version from GitHub
     %
     %   Examples:
     %     t = Terminal();
@@ -34,6 +34,7 @@ classdef Terminal < handle
     %     t = Terminal(Shell="zsh");
     %     t = Terminal(Shell="powershell.exe");
     %     delete(t);
+    %     Terminal.update();
 
     properties (Access = private)
         ServerProcess   % struct with fields: pid (double), port (double)
@@ -59,6 +60,8 @@ classdef Terminal < handle
         DEFAULT_IDLE_TIMEOUT = 30   % seconds
         SERVER_BINARY_NAME = 'matlab-terminal-server'
         POLL_INTERVAL = 0.1         % 100ms polling interval
+        TOOLBOX_ID = '9e8f4a2b-3c1d-4e5f-a6b7-8c9d0e1f2a3b'
+        GITHUB_REPO = 'prabhakk-mw/matlab-terminal'
     end
 
     methods
@@ -99,7 +102,8 @@ classdef Terminal < handle
             if isempty(obj.ServerBinary)
                 error('Terminal:BinaryNotFound', ...
                     ['Server binary "%s" not found.\n' ...
-                     'Run  Terminal.install()  to download it.'], ...
+                     'The toolbox installation may be corrupted.\n' ...
+                     'Run  Terminal.update()  to reinstall.'], ...
                     Terminal.SERVER_BINARY_NAME);
             end
 
@@ -421,6 +425,13 @@ classdef Terminal < handle
     end
 
     methods (Static)
+        function v = version()
+            %VERSION Return the installed toolbox version string.
+            %
+            %   v = Terminal.version()
+            v = TerminalVersion();
+        end
+
         function terminals = list()
             %LIST Return handles to all running Terminal instances.
             %
@@ -440,52 +451,95 @@ classdef Terminal < handle
             end
         end
 
-        function install()
-            %INSTALL Download the server binary for the current platform.
-            arch = computer('arch');
-            checksumFile = fullfile(fileparts(mfilename('fullpath')), 'checksums.json');
-
-            if ~isfile(checksumFile)
-                error('Terminal:NoChecksums', ...
-                    'checksums.json not found at:\n  %s', checksumFile);
-            end
-            info = jsondecode(fileread(checksumFile));
-
-            if ~isfield(info.binaries, arch)
-                error('Terminal:UnsupportedArch', ...
-                    'No binary available for architecture "%s".', arch);
-            end
-            entry = info.binaries.(arch);
-
-            destDir = fullfile(userpath, 'bin');
-            if ~isfolder(destDir)
-                mkdir(destDir);
-            end
-
-            binaryName = Terminal.SERVER_BINARY_NAME;
-            if strcmp(arch, 'win64')
-                binaryName = [binaryName, '.exe'];
-            end
-            destPath = fullfile(destDir, binaryName);
-
-            fprintf('Downloading %s for %s ...\n', binaryName, arch);
-            websave(destPath, entry.url);
-
-            if ~ispc
-                system(sprintf('chmod +x "%s"', destPath));
-            end
-
-            if strcmp(entry.sha256, 'placeholder')
-                fprintf('  [warning] Checksum verification skipped (placeholder hash).\n');
-            else
-                Terminal.verifyChecksum(destPath, entry.sha256);
-            end
-
-            fprintf('Installed server binary to:\n  %s\n', destPath);
-        end
-
         function update()
-            Terminal.install();
+            %UPDATE Check for and install the latest toolbox version from GitHub.
+            %
+            %   Terminal.update()
+            %
+            %   Queries the latest release from GitHub, displays version
+            %   information, and prompts for confirmation before updating.
+
+            disp('Checking for updates...');
+
+            % Query GitHub for the latest release.
+            url = sprintf('https://api.github.com/repos/%s/releases/latest', ...
+                Terminal.GITHUB_REPO);
+            try
+                opts = weboptions('ContentType', 'json', 'Timeout', 10);
+                release = webread(url, opts);
+            catch me
+                error('Terminal:UpdateFailed', ...
+                    'Could not reach GitHub:\n  %s', me.message);
+            end
+
+            latestVersion = string(release.tag_name);
+            if startsWith(latestVersion, 'v')
+                latestVersion = extractAfter(latestVersion, 1);
+            end
+
+            disp(['  Installed version: ', Terminal.version()]);
+            disp(['  Latest version:    ', char(latestVersion)]);
+
+            % Find the .mltbx asset in the release.
+            mltbxURL = '';
+            assets = release.assets;
+            for i = 1:numel(assets)
+                if iscell(assets)
+                    asset = assets{i};
+                else
+                    asset = assets(i);
+                end
+                if endsWith(asset.name, '.mltbx')
+                    mltbxURL = asset.browser_download_url;
+                    break;
+                end
+            end
+            if isempty(mltbxURL)
+                error('Terminal:UpdateFailed', ...
+                    'No .mltbx file found in the latest GitHub release.');
+            end
+
+            % Ask for confirmation.
+            if latestVersion == Terminal.version()
+                disp('Already up to date.');
+                reply = input('Reinstall current version? (y/n): ', 's');
+            else
+                reply = input(sprintf('Update from %s to %s? (y/n): ', ...
+                    Terminal.version(), latestVersion), 's');
+            end
+            if ~strcmpi(reply, 'y')
+                disp('Update cancelled.');
+                return;
+            end
+
+            % Step 1: Close all open terminals.
+            disp('Step 1/5: Closing all open terminals...');
+            Terminal.closeAll();
+
+            % Step 2: Uninstall current toolbox.
+            disp('Step 2/5: Uninstalling current version...');
+            matlab.addons.uninstall(Terminal.TOOLBOX_ID);
+
+            % Step 3: Clear cached assets.
+            cacheRoot = fullfile(prefdir, 'matlab-terminal');
+            if isfolder(cacheRoot)
+                disp('Step 3/5: Clearing cached assets...');
+                rmdir(cacheRoot, 's');
+            else
+                disp('Step 3/5: No cached assets to clear.');
+            end
+
+            % Step 4: Download the latest .mltbx.
+            disp('Step 4/5: Downloading latest release...');
+            tmpFile = fullfile(tempdir, 'Terminal.mltbx');
+            websave(tmpFile, mltbxURL);
+
+            % Step 5: Install the new version.
+            disp('Step 5/5: Installing new version...');
+            matlab.addons.toolbox.installToolbox(tmpFile);
+            delete(tmpFile);
+
+            fprintf('Successfully updated MATLAB Terminal to version %s.\n', latestVersion);
         end
     end
 
@@ -711,33 +765,5 @@ classdef Terminal < handle
             end
         end
 
-        function verifyChecksum(filePath, expectedHash)
-            if ispc
-                [~, result] = system(sprintf('certutil -hashfile "%s" SHA256', filePath));
-                lines = splitlines(strtrim(result));
-                if numel(lines) >= 2
-                    actualHash = strtrim(lines{2});
-                else
-                    warning('Terminal:ChecksumFailed', 'Could not compute checksum.');
-                    return;
-                end
-            elseif ismac
-                [~, result] = system(sprintf('shasum -a 256 "%s"', filePath));
-                parts = strsplit(strtrim(result));
-                actualHash = parts{1};
-            else
-                [~, result] = system(sprintf('sha256sum "%s"', filePath));
-                parts = strsplit(strtrim(result));
-                actualHash = parts{1};
-            end
-
-            if ~strcmpi(actualHash, expectedHash)
-                warning('Terminal:ChecksumMismatch', ...
-                    'Checksum mismatch!\n  Expected: %s\n  Actual:   %s', ...
-                    expectedHash, actualHash);
-            else
-                fprintf('  Checksum verified.\n');
-            end
-        end
     end
 end
