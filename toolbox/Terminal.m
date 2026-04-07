@@ -50,7 +50,8 @@ classdef Terminal < handle
         OutQueue cell = {}  % queued messages from JS to send to server (legacy only)
         UseEvents logical = false  % true if R2023a+ event API is available
         ThemeConfig        % cached theme config for re-init on HTML reload
-        ThemeListener      % listener for groot theme changes
+        ThemePollCount double = 0  % tick counter for periodic theme check
+        LastFigureColor    % cached groot DefaultFigureColor for change detection
     end
 
     properties (SetAccess = private)
@@ -61,6 +62,7 @@ classdef Terminal < handle
         DEFAULT_IDLE_TIMEOUT = 30   % seconds
         SERVER_BINARY_NAME = 'matlab-terminal-server'
         POLL_INTERVAL = 0.1         % 100ms polling interval
+        THEME_CHECK_TICKS = 50     % check theme every 50 ticks (5 seconds)
         TOOLBOX_ID = '9e8f4a2b-3c1d-4e5f-a6b7-8c9d0e1f2a3b'
         GITHUB_REPO = 'prabhakk-mw/matlab-terminal'
     end
@@ -251,7 +253,6 @@ classdef Terminal < handle
                 stop(obj.PollTimer);
                 delete(obj.PollTimer);
             end
-            delete(obj.ThemeListener);
             if ~isempty(obj.ServerProcess) && isstruct(obj.ServerProcess) ...
                     && isfield(obj.ServerProcess, 'pid') && ~isnan(obj.ServerProcess.pid)
                 Terminal.killProcess(obj.ServerProcess.pid);
@@ -282,13 +283,11 @@ classdef Terminal < handle
                 obj.HTMLComponent.Data = struct('type', 'init', 'theme', themeConfig);
             end
 
-            % Listen for theme changes (light/dark switch).
+            % Snapshot the current figure color for theme change detection.
             try
-                obj.ThemeListener = addlistener(groot, ...
-                    'DefaultFigureColor', 'PostSet', ...
-                    @(~,~) obj.onThemeChanged());
+                obj.LastFigureColor = get(groot, 'defaultFigureColor');
             catch
-                % Listener not supported on this release — ignore.
+                obj.LastFigureColor = [];
             end
 
             % Start polling for server output.
@@ -300,8 +299,17 @@ classdef Terminal < handle
             start(obj.PollTimer);
         end
 
-        function onThemeChanged(obj)
-            %ONTHEMECHANGED Rebuild theme config and push to JS.
+        function checkThemeChanged(obj)
+            %CHECKTHEMECHANGED Compare current figure color to cached value.
+            try
+                c = get(groot, 'defaultFigureColor');
+            catch
+                return;
+            end
+            if isequal(c, obj.LastFigureColor)
+                return;
+            end
+            obj.LastFigureColor = c;
             newConfig = Terminal.buildThemeConfig();
             obj.ThemeConfig = newConfig;
             obj.sendToJS(struct('type', 'theme', ...
@@ -331,6 +339,13 @@ classdef Terminal < handle
         function pollOutput(obj)
             %POLLOUTPUT Process queued JS messages, then poll for output.
             try
+                % --- Periodic theme change detection ---
+                obj.ThemePollCount = obj.ThemePollCount + 1;
+                if obj.ThemePollCount >= obj.THEME_CHECK_TICKS
+                    obj.ThemePollCount = 0;
+                    obj.checkThemeChanged();
+                end
+
                 % --- Drain outbound queue (JS -> server) ---
                 if ~isempty(obj.OutQueue)
                     if obj.UseEvents
