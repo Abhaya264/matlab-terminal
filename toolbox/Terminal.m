@@ -536,7 +536,7 @@ classdef Terminal < handle
 
             % Step 5: Install the new version.
             disp('Step 5/5: Installing new version...');
-            matlab.addons.toolbox.installToolbox(tmpFile);
+            matlab.addons.install(tmpFile);
             delete(tmpFile);
 
             fprintf('Successfully updated MATLAB Terminal to version %s.\n', latestVersion);

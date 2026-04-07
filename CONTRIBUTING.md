@@ -53,7 +53,9 @@ The `-ldflags "-s -w"` flag strips debug symbols to reduce size.
 From MATLAB, in the project root:
 
 ```matlab
-run('build/package.m')
+addpath('build')
+package()             % dev build (version from TerminalVersion.m)
+package("1.2.0")      % release build with explicit version
 ```
 
 This bundles web assets and the Go binary into `dist/Terminal.mltbx`.
@@ -78,7 +80,13 @@ Terminal()
 ```
 toolbox/                            Toolbox source (shipped in .mltbx)
   Terminal.m                        Main MATLAB class
+  TerminalVersion.m                 Version string (stamped at build time)
   openTerminal.m                    Launcher for Apps tab
+  doc/                              Documentation
+    GettingStarted.m                Getting Started source (diffable)
+    GettingStarted.mlx              Getting Started live script (shown on install)
+  images/                           Toolbox icon
+    matlab-terminal.jpeg
   html/                             Web frontend (xterm.js, inline JS)
     index.html                      Terminal UI
     terminal.css                    Styles
@@ -95,7 +103,7 @@ server/                             Go server source
   auth.go                           Token validation middleware
 build/                              Build tooling (not shipped)
   build_assets.m                    Bundles web assets + binary into .mat
-  package.m                         Builds .mltbx
+  package.m                         Builds .mltbx (function, accepts version arg)
   setup_xterm.sh                    Downloads and vendors xterm.js
 dist/                               Build output (gitignored)
 ```

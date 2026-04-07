@@ -138,7 +138,7 @@ The server binds exclusively to `127.0.0.1` (not `0.0.0.0`) on a randomly assign
 The terminal inherently provides shell access. This is by design, with the same trust model as VS Code's integrated terminal. The terminal runs with the same permissions as the MATLAB process.
 
 ### 4.4 Binary Integrity
-The server binary is bundled in `web_assets.mat` and extracted locally. For manual installation via `Terminal.install()`, SHA-256 checksums in `checksums.json` are verified after download.
+The server binary is bundled in `web_assets.mat` inside the `.mltbx` and extracted locally on first launch. There is no separate download step — the binary ships with the toolbox.
 
 ### 4.5 Orphan Processes
 - Go binary implements an idle timeout — self-terminates when no sessions are active
@@ -151,10 +151,14 @@ The server binary is bundled in `web_assets.mat` and extracted locally. For manu
 matlab-terminal/
 ├── toolbox/                        # MATLAB Toolbox (.mltbx source)
 │   ├── Terminal.m                  # Main MATLAB class
+│   ├── TerminalVersion.m          # Version string (stamped at build time)
 │   ├── openTerminal.m              # Simple launcher for Apps tab
-│   ├── installServer.m             # Convenience wrapper for Terminal.install()
-│   ├── checksums.json              # SHA-256 hashes for download verification
 │   ├── web_assets.mat              # Bundled HTML/CSS/JS + binary (generated)
+│   ├── doc/                        # Documentation
+│   │   ├── GettingStarted.m       # Getting Started source (diffable)
+│   │   └── GettingStarted.mlx     # Getting Started live script (shown on install)
+│   ├── images/                     # Toolbox icon
+│   │   └── matlab-terminal.jpeg
 │   └── html/                       # Web assets (used in dev, bundled for release)
 │       ├── index.html              # Host page with ALL JS inline (uihtml requirement)
 │       ├── terminal.css            # Tab bar + theme + loading overlay styles
@@ -172,7 +176,7 @@ matlab-terminal/
 │   └── go.mod / go.sum             # Go module dependencies
 ├── build/                          # Build tooling (not shipped in .mltbx)
 │   ├── build_assets.m              # Packs web assets + binary into .mat
-│   ├── package.m                   # Builds .mltbx (calls build_assets.m)
+│   ├── package.m                   # Builds .mltbx (function, accepts version arg)
 │   └── setup_xterm.sh              # Downloads and vendors xterm.js
 ├── dist/                           # Build output (gitignored)
 │   ├── glnxa64/                    # Linux binary

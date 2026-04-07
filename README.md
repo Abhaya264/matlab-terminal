@@ -1,4 +1,4 @@
-# Terminal in MATLAB 
+# Terminal in MATLAB
 
 Embedded system terminal for MATLAB Desktop. Run CLI tools, git, docker, AI coding agents, and more — without leaving MATLAB.
 
@@ -27,6 +27,7 @@ MATLAB Terminal brings the system shell directly into the MATLAB Desktop, so you
 - **MATLAB theme integration** — Automatically inherits your MATLAB theme (light or dark), code font family, and font size. Theme is preserved when undocking or moving panels.
 - **Copy and paste** — Ctrl+Shift+C to copy selection, Ctrl+Shift+V to paste.
 - **Instance management** — `Terminal.list()` returns handles to all running terminals, `Terminal.closeAll()` closes them all.
+- **Self-updating** — `Terminal.update()` checks GitHub for new releases and walks you through the upgrade interactively.
 - **Auto-cleanup** — Closing the last tab closes the window. The server process is killed when the terminal is deleted or MATLAB exits. Idle timeout as a safety net.
 - **MATLAB environment variables** — Terminal sessions have `MATLAB_PID` and `MATLAB_ROOT` set, allowing CLI tools to discover the running MATLAB instance.
 - **R2023a+ event API** — On MATLAB R2023a and later, uses the event-based `sendEventToHTMLSource`/`HTMLEventReceivedFcn` API for reliable keystroke delivery with no data loss. Older releases fall back to the Data channel with buffering.
@@ -41,10 +42,12 @@ MATLAB Terminal brings the system shell directly into the MATLAB Desktop, so you
 Download `Terminal.mltbx` from the [latest release](../../releases/latest) and install in MATLAB:
 
 ```matlab
-matlab.addons.toolbox.installToolbox('Terminal.mltbx')
+matlab.addons.install('Terminal.mltbx')
 ```
 
 On first launch, bundled assets are automatically extracted to a local cache. No additional setup is required.
+
+After installation, the Getting Started guide opens automatically with usage examples.
 
 ### Usage
 
@@ -65,6 +68,9 @@ t = Terminal(Shell="powershell.exe"); % Windows
 % Query the shell in use
 t.Shell
 
+% Check the installed version
+Terminal.version()
+
 % List all running terminals
 Terminal.list()
 
@@ -73,6 +79,9 @@ Terminal.closeAll()
 
 % Close a single terminal
 delete(t);
+
+% Check for updates
+Terminal.update()
 ```
 
 ### Keyboard Shortcuts
@@ -101,6 +110,14 @@ The exact minimum MATLAB release is yet to be determined. The following features
 | `sendEventToHTMLSource` / `HTMLEventReceivedFcn` (optional, improves typing) | R2023a |
 | `matlab.addons.toolbox.ToolboxOptions` (build-time only) | R2022a |
 
+### Updating
+
+```matlab
+Terminal.update()
+```
+
+This checks GitHub for a newer release, shows the version comparison, and prompts for confirmation before upgrading. The update process closes all open terminals, uninstalls the current version, clears cached assets, and installs the new release.
+
 ### Uninstalling
 
 ```matlab
@@ -117,9 +134,13 @@ matlab.addons.uninstall('MATLAB Terminal')
 matlab-terminal/
 ├── toolbox/                        # Toolbox source (becomes .mltbx content)
 │   ├── Terminal.m                  # Main MATLAB class
+│   ├── TerminalVersion.m          # Version string (stamped at build time)
 │   ├── openTerminal.m              # Launcher for Apps tab
-│   ├── installServer.m             # Convenience wrapper for Terminal.install()
-│   ├── checksums.json              # SHA-256 hashes for manual binary download
+│   ├── doc/                        # Documentation
+│   │   ├── GettingStarted.m       # Getting Started source (diffable)
+│   │   └── GettingStarted.mlx     # Getting Started live script (shown on install)
+│   ├── images/                     # Toolbox icon
+│   │   └── matlab-terminal.jpeg
 │   └── html/                       # Web frontend
 │       ├── index.html              # Terminal UI (all JS inline, uihtml requirement)
 │       ├── terminal.css            # Tab bar, theme, loading overlay styles
@@ -137,7 +158,7 @@ matlab-terminal/
 │   └── go.mod / go.sum             # Go dependencies
 ├── build/                          # Build tooling (not shipped in .mltbx)
 │   ├── build_assets.m              # Bundles web assets + binary into .mat
-│   ├── package.m                   # Builds .mltbx (calls build_assets.m)
+│   ├── package.m                   # Builds .mltbx (function, accepts version arg)
 │   └── setup_xterm.sh              # Downloads and vendors xterm.js
 ├── dist/                           # Build output (gitignored)
 │   ├── glnxa64/                    # Linux binary
@@ -191,7 +212,7 @@ See [DESIGN.md](DESIGN.md) for detailed architecture decisions and security anal
    Terminal()
    ```
 
-When running from source, `Terminal.m` uses `html/` directly and finds the server binary via `$PATH` — no `.mat` extraction needed.
+When running from source, `Terminal.m` uses `html/` directly and finds the server binary via `dist/<arch>/` — no `.mat` extraction needed.
 
 ### Building a Release
 
@@ -203,17 +224,22 @@ Requires MATLAB and compiled Go binaries in `dist/<arch>/`.
 
 ```matlab
 cd /path/to/matlab-terminal
+addpath('build')
 
-% This runs build_assets.m (packs HTML + binary into .mat) then packageToolbox.
-run('build/package.m')
+% Dev build (uses version from TerminalVersion.m, defaults to 0.0.0-dev)
+package()
+
+% Release build with explicit version
+package("1.2.0")
 ```
 
 Output: `dist/Terminal.mltbx`
 
-#### What `package.m` does
+#### What `package()` does
 
-1. **`build_assets.m`** — Reads `html/` files and all server binaries from `dist/<arch>/`, packs them as byte arrays into `toolbox/web_assets.mat`. This works around `packageToolbox` silently dropping `.html`, `.css`, `.js`, and binary files.
-2. **`packageToolbox`** — Creates the `.mltbx` from `toolbox/`, which now includes the `.mat` alongside the `.m` files.
+1. **Resolves version** — Uses the provided argument, or falls back to the value in `TerminalVersion.m`. Stamps `TerminalVersion.m` with the build version so it's baked into the `.mltbx`.
+2. **`build_assets.m`** — Reads `html/` files and all server binaries from `dist/<arch>/`, packs them as byte arrays into `toolbox/web_assets.mat`. This works around `packageToolbox` silently dropping `.html`, `.css`, `.js`, and binary files.
+3. **`packageToolbox`** — Creates the `.mltbx` from `toolbox/`, which now includes the `.mat` alongside the `.m` files, the Getting Started guide, and the toolbox icon.
 
 At runtime, `Terminal.m` extracts assets from `web_assets.mat` to `prefdir/matlab-terminal/` on first launch (version-stamped to avoid re-extraction).
 
@@ -224,14 +250,14 @@ A release build involves three stages: cross-compiling Go binaries for all platf
 The workflow is defined in `.github/workflows/release.yml` and triggered by pushing a version tag:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.6.0
+git push origin v0.6.0
 ```
 
 **Pipeline stages:**
 
 1. **`build-server`** — Cross-compiles the Go binary for Linux (`glnxa64`), macOS Intel (`maci64`), macOS Apple Silicon (`maca64`), and Windows (`win64`) in parallel using a build matrix.
-2. **`build-mltbx`** — Downloads all binaries into `dist/<arch>/`, sets up MATLAB via `matlab-actions/setup-matlab`, and runs `build/package.m` to create a single `.mltbx` containing all platform binaries.
+2. **`build-mltbx`** — Downloads all binaries into `dist/<arch>/`, sets up MATLAB via `matlab-actions/setup-matlab`, and runs `package()` with the git tag as the version argument to create a single `.mltbx` containing all platform binaries.
 3. **`release`** — Creates a GitHub Release with the `.mltbx` attached and commit-based release notes.
 
 > **Note**: The `matlab-actions/setup-matlab` action requires a [MATLAB license](https://github.com/matlab-actions/setup-matlab#use-matlab-batch-licensing-token). For public repositories, MathWorks provides free CI licenses via [MATLAB batch licensing tokens](https://www.mathworks.com/help/cloudcenter/ug/matlab-batch-licensing-tokens.html).
@@ -241,7 +267,6 @@ The resulting `.mltbx` is a single cross-platform artifact. At install time, `Te
 ## Known Limitations and Roadmap
 
 ### Not yet implemented
-- **Apps tab icon** — `AppGalleryFiles` in `ToolboxOptions` does not reliably register apps in the MATLAB Apps toolstrip. The toolbox installs and works, but there is no icon in the Apps tab.
 - **Session persistence** — Terminal sessions are not preserved across MATLAB restarts.
 
 ### Known issues
