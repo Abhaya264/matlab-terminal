@@ -759,17 +759,14 @@ classdef Terminal < handle
                 fontSize = 14;
             end
 
-            % On Windows, MATLAB reports font size in points but xterm.js
-            % expects CSS pixels. Convert using the screen DPI to account
-            % for the pt-to-px conversion and OS display scaling.
-            if ispc
-                try
-                    screenPPI = get(groot, 'ScreenPixelsPerInch');
-                catch
-                    screenPPI = 96;
-                end
-                fontSize = round(fontSize * screenPPI / 72);
+            % MATLAB reports font size in points; xterm.js expects CSS
+            % pixels. Convert using screen DPI (pt * PPI/72 = px).
+            try
+                screenPPI = get(groot, 'ScreenPixelsPerInch');
+            catch
+                screenPPI = 96;
             end
+            fontSize = round(fontSize * screenPPI / 72);
 
             isDark = false;
             try
