@@ -9,13 +9,16 @@ import (
 	"sync"
 )
 
+const scrollbackCap = 128 * 1024 // 128 KB per session
+
 // Session represents a single PTY session.
 type Session struct {
 	ID  string
 	pty ptyProcess
 
-	mu     sync.Mutex
-	closed bool
+	mu         sync.Mutex
+	closed     bool
+	scrollback []byte // ring buffer of recent output
 }
 
 // OutputCallback is called when there is output from a session.
@@ -66,8 +69,9 @@ func (m *SessionManager) Create(shell string, cols, rows uint16, onOutput Output
 	}
 
 	sess := &Session{
-		ID:  id,
-		pty: p,
+		ID:         id,
+		pty:        p,
+		scrollback: make([]byte, 0, 4096),
 	}
 
 	m.mu.Lock()
@@ -82,6 +86,7 @@ func (m *SessionManager) Create(shell string, cols, rows uint16, onOutput Output
 			if n > 0 {
 				data := make([]byte, n)
 				copy(data, buf[:n])
+				sess.appendScrollback(data)
 				onOutput(id, data)
 			}
 			if err != nil {
@@ -153,6 +158,40 @@ func (m *SessionManager) Count() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return len(m.sessions)
+}
+
+// IDs returns the IDs of all active sessions.
+func (m *SessionManager) IDs() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ids := make([]string, 0, len(m.sessions))
+	for id := range m.sessions {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+// Scrollback returns the scrollback buffer for a session.
+func (m *SessionManager) Scrollback(id string) []byte {
+	sess := m.get(id)
+	if sess == nil {
+		return nil
+	}
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
+	out := make([]byte, len(sess.scrollback))
+	copy(out, sess.scrollback)
+	return out
+}
+
+func (s *Session) appendScrollback(data []byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.scrollback = append(s.scrollback, data...)
+	if len(s.scrollback) > scrollbackCap {
+		// Keep only the tail.
+		s.scrollback = s.scrollback[len(s.scrollback)-scrollbackCap:]
+	}
 }
 
 func (m *SessionManager) get(id string) *Session {

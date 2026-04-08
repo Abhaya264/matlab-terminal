@@ -237,7 +237,7 @@ func (h *APIHandler) HandlePoll(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"messages": messages})
 }
 
-// HandleSessions returns the count of active sessions.
+// HandleSessions returns the IDs and count of active sessions.
 func (h *APIHandler) HandleSessions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -246,8 +246,34 @@ func (h *APIHandler) HandleSessions(w http.ResponseWriter, r *http.Request) {
 	if !h.checkAuth(w, r) {
 		return
 	}
+	ids := h.manager.IDs()
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]int{"count": h.manager.Count()})
+	json.NewEncoder(w).Encode(map[string]interface{}{"ids": ids, "count": len(ids)})
+}
+
+// HandleScrollback returns the scrollback buffer for a session.
+func (h *APIHandler) HandleScrollback(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !h.checkAuth(w, r) {
+		return
+	}
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		http.Error(w, "missing id parameter", http.StatusBadRequest)
+		return
+	}
+	data := h.manager.Scrollback(id)
+	if data == nil {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"data": base64.StdEncoding.EncodeToString(data),
+	})
 }
 
 func (h *APIHandler) getMessagesSince(since int64) []outputMessage {

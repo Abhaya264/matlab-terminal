@@ -66,6 +66,7 @@ func main() {
 	mux.HandleFunc("/api/close", apiHandler.HandleClose)
 	mux.HandleFunc("/api/poll", apiHandler.HandlePoll)
 	mux.HandleFunc("/api/sessions", apiHandler.HandleSessions)
+	mux.HandleFunc("/api/scrollback", apiHandler.HandleScrollback)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))

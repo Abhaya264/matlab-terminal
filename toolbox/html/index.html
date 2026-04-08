@@ -189,11 +189,20 @@
         function initialize(theme) {
             if (initialized) return;
             initialized = true;
-            dbg('Initializing with theme');
             config = { theme: theme };
             applyTheme(theme);
-            // Auto-create the first terminal tab.
-            createTab();
+
+            var existingIds = theme.existingSessionIds;
+            var scrollbacks = theme.scrollbacks || {};
+            if (existingIds && existingIds.length > 0) {
+                dbg('Reconnecting to ' + existingIds.length + ' existing session(s)');
+                for (var i = 0; i < existingIds.length; i++) {
+                    reconnectTab(existingIds[i], scrollbacks[existingIds[i]]);
+                }
+            } else {
+                dbg('Initializing with new tab');
+                createTab();
+            }
         }
 
         window.setup = function (component) {
@@ -422,6 +431,133 @@
             }, 100);
             setTimeout(delayedFitAndResize, 500);
             setTimeout(delayedFitAndResize, 1500);
+        }
+
+        function reconnectTab(id, scrollbackBase64) {
+            // Re-create the UI for an existing server session after a page reload.
+            tabCounter++;
+            var tabName = 'Terminal ' + tabCounter;
+
+            var tabEl = document.createElement('div');
+            tabEl.className = 'tab';
+            tabEl.innerHTML =
+                '<span class="tab-label">' + tabName + '</span>' +
+                '<button class="tab-close" title="Close">&times;</button>';
+
+            var wrapper = document.createElement('div');
+            wrapper.className = 'terminal-wrapper';
+            containerEl.appendChild(wrapper);
+
+            var theme = config && config.theme;
+            var terminal = new Terminal({
+                fontFamily: (theme && theme.fontFamily) || 'Consolas, monospace',
+                fontSize: (theme && theme.fontSize) || 14,
+                theme: buildXtermTheme(theme),
+                cursorBlink: true,
+                allowProposedApi: true
+            });
+
+            var fitAddon = new FitAddon.FitAddon();
+            terminal.loadAddon(fitAddon);
+            terminal.open(wrapper);
+
+            // Replay scrollback to restore previous output.
+            if (scrollbackBase64) {
+                dbg('Replaying scrollback for ' + id + ' (' + scrollbackBase64.length + ' base64 chars)');
+                var raw = atob(scrollbackBase64);
+                var bytes = new Uint8Array(raw.length);
+                for (var j = 0; j < raw.length; j++) {
+                    bytes[j] = raw.charCodeAt(j);
+                }
+                terminal.write(bytes);
+            }
+
+            tabsEl.appendChild(tabEl);
+
+            // Directly finalize with the known session ID (no server create needed).
+            var entry = {
+                terminal: terminal,
+                fitAddon: fitAddon,
+                wrapper: wrapper,
+                tab: tabEl,
+                exited: false
+            };
+            tabs[id] = entry;
+
+            // Hide loading overlay.
+            var overlay = document.getElementById('loading-overlay');
+            if (overlay) overlay.classList.add('hidden');
+            tabEl.dataset.tabId = id;
+            activeTabId = id;
+
+            tabEl.addEventListener('click', function (e) {
+                if (e.target.classList.contains('tab-close')) return;
+                switchTab(id);
+            });
+
+            tabEl.querySelector('.tab-close').addEventListener('click', function (e) {
+                e.stopPropagation();
+                closeTab(id);
+            });
+
+            terminal.onData(function (data) {
+                if (!entry.exited) {
+                    bufferInput(id, data);
+                }
+            });
+
+            terminal.onResize(function (size) {
+                sendToMATLAB({ type: 'resize', id: id, cols: size.cols, rows: size.rows });
+            });
+
+            if (navigator.clipboard) {
+                terminal.attachCustomKeyEventHandler(function (e) {
+                    if (e.ctrlKey && e.shiftKey && e.type === 'keydown') {
+                        if (e.key === 'C') {
+                            try {
+                                var sel = terminal.getSelection();
+                                if (sel) navigator.clipboard.writeText(sel);
+                            } catch (err) {}
+                            return false;
+                        }
+                        if (e.key === 'V') {
+                            try {
+                                navigator.clipboard.readText().then(function (text) {
+                                    if (text && !entry.exited) bufferInput(id, text);
+                                });
+                            } catch (err) {}
+                            return false;
+                        }
+                    }
+                    return true;
+                });
+            }
+
+            switchToWrapper(wrapper, tabEl);
+
+            void wrapper.offsetHeight;
+            fitAddon.fit();
+
+            var dims = fitAddon.proposeDimensions();
+            if (dims) {
+                sendToMATLAB({ type: 'resize', id: id, cols: dims.cols, rows: dims.rows });
+            }
+
+            terminal.focus();
+
+            setTimeout(function () {
+                fitAddon.fit();
+                terminal.refresh(0, terminal.rows - 1);
+                terminal.focus();
+                var d = fitAddon.proposeDimensions();
+                if (d && d.cols > 0 && d.rows > 0) {
+                    sendToMATLAB({ type: 'resize', id: id, cols: d.cols, rows: d.rows });
+                }
+            }, 100);
+            setTimeout(function () {
+                fitAddon.fit();
+                terminal.refresh(0, terminal.rows - 1);
+            }, 500);
         }
 
         function closeTab(id) {

@@ -407,12 +407,42 @@ classdef Terminal < handle
             switch msg.type
                 case 'ready'
                     % HTML page (re)loaded — re-send init so JS can start.
-                    % Send directly (not via sendToJS) to match the format
-                    % that deferredInit uses for the init event.
+                    % Query the server for existing sessions so JS can
+                    % reconnect instead of creating new tabs.
+                    initData = obj.ThemeConfig;
+                    try
+                        url = [obj.BaseURL, '/api/sessions'];
+                        resp = webread(url, obj.ReadOpts);
+                        if isfield(resp, 'ids') && ~isempty(resp.ids)
+                            if ischar(resp.ids) || isstring(resp.ids)
+                                ids = {char(resp.ids)};
+                            else
+                                ids = resp.ids;
+                            end
+                            initData.existingSessionIds = ids;
+                            % Fetch scrollback for each session.
+                            scrollbacks = struct();
+                            for k = 1:numel(ids)
+                                sid = ids{k};
+                                try
+                                    sbUrl = sprintf('%s/api/scrollback?id=%s', obj.BaseURL, sid);
+                                    sbResp = webread(sbUrl, obj.ReadOpts);
+                                    if isfield(sbResp, 'data')
+                                        scrollbacks.(sid) = sbResp.data;
+                                    end
+                                catch
+                                end
+                            end
+                            initData.scrollbacks = scrollbacks;
+                        end
+                    catch
+                        % Server may not be ready yet — JS will create a
+                        % new tab as usual.
+                    end
                     if obj.UseEvents
-                        sendEventToHTMLSource(obj.HTMLComponent, 'init', obj.ThemeConfig);
+                        sendEventToHTMLSource(obj.HTMLComponent, 'init', initData);
                     else
-                        obj.HTMLComponent.Data = struct('type', 'init', 'theme', obj.ThemeConfig);
+                        obj.HTMLComponent.Data = struct('type', 'init', 'theme', initData);
                     end
                 case 'create'
                     createReq = struct('cols', 80, 'rows', 24, 'shell', obj.Shell);
