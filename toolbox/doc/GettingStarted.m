@@ -1,5 +1,5 @@
-%% Getting Started with MATLAB Terminal
-% MATLAB Terminal embeds a full system terminal inside the MATLAB Desktop.
+%% Getting Started with Terminal
+% Terminal embeds a full system terminal inside the MATLAB Desktop.
 % Run shell commands, git, docker, and CLI tools without leaving MATLAB.
 
 %% Opening a Terminal

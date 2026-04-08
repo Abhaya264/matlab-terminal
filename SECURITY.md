@@ -11,7 +11,7 @@ for additional information.
 
 ## Security Model
 
-MATLAB Terminal launches a local Go server that manages PTY (pseudo-terminal) sessions. The terminal runs with the same permissions as the MATLAB process — there is no privilege escalation. This is the same trust model as VS Code's integrated terminal.
+Terminal launches a local Go server that manages PTY (pseudo-terminal) sessions. The terminal runs with the same permissions as the MATLAB process — there is no privilege escalation. This is the same trust model as VS Code's integrated terminal.
 
 ### Authentication
 

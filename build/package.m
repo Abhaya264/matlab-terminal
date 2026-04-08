@@ -50,7 +50,7 @@ function package(toolboxVersion)
     opts = matlab.addons.toolbox.ToolboxOptions(toolboxDir, ...
         '9e8f4a2b-3c1d-4e5f-a6b7-8c9d0e1f2a3b');
 
-    opts.ToolboxName = 'MATLAB Terminal';
+    opts.ToolboxName = 'Terminal';
     opts.ToolboxVersion = toolboxVersion;
     opts.Summary = 'Embedded system terminal for MATLAB';
     opts.Description = ['Run system commands, git, docker, and CLI tools ' ...

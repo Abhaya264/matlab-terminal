@@ -10,7 +10,7 @@ classdef Terminal < handle
     %   delete(t)                         — closes the terminal and kills the server
     %
     %   Name-Value Arguments:
-    %     Name        - Title of the terminal window (default: "MATLAB Terminal")
+    %     Name        - Title of the terminal window (default: "Terminal")
     %     WindowStyle - "docked" (default) or "normal"
     %     Shell       - Shell program to run. Can be a name on PATH or an
     %                   absolute path. Default: system shell ($SHELL on
@@ -72,7 +72,7 @@ classdef Terminal < handle
             %TERMINAL Construct a terminal instance.
             arguments
                 parent = []
-                options.Name (1,1) string = "MATLAB Terminal"
+                options.Name (1,1) string = "Terminal"
                 options.WindowStyle (1,1) string {mustBeMember(options.WindowStyle, ["docked", "normal"])} = "docked"
                 options.Shell (1,1) string = ""
             end
@@ -580,7 +580,7 @@ classdef Terminal < handle
             matlab.addons.install(tmpFile);
             delete(tmpFile);
 
-            fprintf('Successfully updated MATLAB Terminal to version %s.\n', latestVersion);
+            fprintf('Successfully updated Terminal to version %s.\n', latestVersion);
         end
     end
 

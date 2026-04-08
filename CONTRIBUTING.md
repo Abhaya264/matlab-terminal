@@ -1,4 +1,4 @@
-# Contributing to MATLAB Terminal
+# Contributing to Terminal in MATLAB
 
 Thank you for your interest in contributing! This guide covers everything you need to get started.
 
