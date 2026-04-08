@@ -2,6 +2,8 @@
 
 Embed a full system terminal in the MATLAB® Desktop. Run shell commands, `git`, `docker`, AI coding agents, and other CLI tools without leaving MATLAB.
 
+![Terminal in MATLAB](images/hero.gif)
+
 ## Installation
 
 Download `Terminal.mltbx` from the [latest release](../../releases/latest) and install:
@@ -66,6 +68,8 @@ Terminal.update()
 
 This queries GitHub for the latest release, displays a version comparison, and prompts for confirmation before upgrading. The update process closes all open terminals, uninstalls the current version, clears cached assets, downloads the new `.mltbx`, and installs it.
 
+![Terminal.update() output](images/update.png)
+
 ## Uninstalling
 
 ```matlab
@@ -78,8 +82,15 @@ matlab.addons.uninstall('Terminal')
 - **Cross-platform** — Linux, macOS, and Windows. Uses `creack/pty` on Unix and ConPTY on Windows.
 - **Configurable shell** — Specify a shell with `Terminal(Shell="zsh")`. Defaults to `$SHELL` on Unix, `%COMSPEC%` on Windows.
 - **Tabbed interface** — Open multiple terminal sessions in a single panel. Create, close, and switch tabs.
+
+  ![Multiple tabs](images/tabs.png)
+
 - **Docked in MATLAB Desktop** — The terminal panel docks into the MATLAB layout like any other tool window. Undock to a floating window with `WindowStyle="normal"`.
 - **Theme integration** — Inherits the MATLAB theme (light or dark), code font family, and font size. Switching themes updates all open terminals in real time.
+
+  | Light | Dark |
+  |-------|------|
+  | ![Light theme](images/theme-light.png) | ![Dark theme](images/theme-dark.png) |
 - **Copy and paste** — Ctrl+Shift+C to copy, Ctrl+Shift+V to paste.
 - **Instance management** — `Terminal.list()` returns handles to all running terminals. `Terminal.closeAll()` closes them all.
 - **Self-updating** — `Terminal.update()` checks GitHub for new releases and walks through the upgrade interactively.
