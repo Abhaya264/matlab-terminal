@@ -32,7 +32,23 @@ function package(toolboxVersion)
     end
     fprintf('Version: %s\n', toolboxVersion);
 
-    % Stamp TerminalVersion.m with the build version.
+    % Derive a numeric toolbox version. MATLAB's ToolboxOptions only
+    % accepts Major.Minor.Patch[.Build] — no prerelease suffixes.
+    % Map "-mcp" to .999 (internal MCP builds) and any other suffix
+    % (e.g. "-rc1", "-beta") to .1.
+    matlabVersion = toolboxVersion;
+    hyphenIdx = strfind(matlabVersion, '-');
+    if ~isempty(hyphenIdx)
+        base = extractBefore(matlabVersion, hyphenIdx(1));
+        suffix = extractAfter(matlabVersion, hyphenIdx(1));
+        if suffix == "mcp"
+            matlabVersion = base + ".999";
+        else
+            matlabVersion = base + ".1";
+        end
+    end
+
+    % Stamp TerminalVersion.m with the full version (including suffix).
     versionFile = fullfile(toolboxDir, 'TerminalVersion.m');
     fid = fopen(versionFile, 'w');
     fprintf(fid, 'function v = TerminalVersion()\n');
@@ -51,7 +67,7 @@ function package(toolboxVersion)
         '9e8f4a2b-3c1d-4e5f-a6b7-8c9d0e1f2a3b');
 
     opts.ToolboxName = 'Terminal';
-    opts.ToolboxVersion = toolboxVersion;
+    opts.ToolboxVersion = matlabVersion;
     opts.Summary = 'Embedded system terminal for MATLAB';
     opts.Description = ['Run system commands, git, docker, and CLI tools ' ...
         'directly inside the MATLAB Desktop. ' ...
