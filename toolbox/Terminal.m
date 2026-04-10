@@ -21,6 +21,14 @@ classdef Terminal < handle
     %                                  "/bin/bash", "/usr/bin/zsh"
     %                     Windows:     "cmd.exe", "powershell.exe", "pwsh.exe",
     %                                  "wsl.exe"
+    %     Theme       - Color theme. Default: "auto" (follows MATLAB light/dark).
+    %                   Built-in: "light", "dark"
+    %                   Presets:  "dracula", "monokai", "solarized-dark",
+    %                             "solarized-light", "nord", "gruvbox-dark",
+    %                             "one-dark", "tokyo-night", "catppuccin-mocha"
+    %                   Custom:   struct with fields: background, foreground,
+    %                             cursor, selectionBackground, and ANSI colors
+    %                             (black, red, green, ..., brightWhite)
     %
     %   Static methods:
     %     Terminal.version()  — return the installed toolbox version string
@@ -29,12 +37,20 @@ classdef Terminal < handle
     %     Terminal.update()          — update to the latest stable release from GitHub
     %     Terminal.update("1.2.0")  — install a specific version (release candidates too)
     %     Terminal.versions()       — list available releases on GitHub
+    %     Terminal.themes()   — list available theme names
+    %     Terminal.setDefaultTheme("dracula") — set default for new terminals
+    %     Terminal.getDefaultTheme()          — get current default theme
     %
     %   Examples:
     %     t = Terminal();
     %     t = Terminal(Name="Git", WindowStyle="normal");
     %     t = Terminal(Shell="zsh");
     %     t = Terminal(Shell="powershell.exe");
+    %     t = Terminal(Theme="dracula");
+    %     t = Terminal(Theme="solarized-light");
+    %     t.Theme = "monokai";    % change theme after creation
+    %     Terminal.setDefaultTheme("dracula");  % persist across sessions
+    %     Terminal.getDefaultTheme();
     %     delete(t);
     %     Terminal.update();
     %     Terminal.update("0.8.0-rc1");
@@ -62,6 +78,10 @@ classdef Terminal < handle
         Shell string        % shell program for new sessions (empty = server default)
     end
 
+    properties
+        Theme = "auto"      % "auto" | "light" | "dark" | preset name | struct
+    end
+
     properties (Constant, Access = private)
         DEFAULT_IDLE_TIMEOUT = 30   % seconds
         SERVER_BINARY_NAME = 'matlab-terminal-server'
@@ -79,9 +99,17 @@ classdef Terminal < handle
                 options.Name (1,1) string = "Terminal"
                 options.WindowStyle (1,1) string {mustBeMember(options.WindowStyle, ["docked", "normal"])} = "docked"
                 options.Shell (1,1) string = ""
+                options.Theme = missing
             end
 
             obj.Shell = options.Shell;
+
+            % Use saved default theme if not explicitly provided.
+            if ismissing(options.Theme)
+                options.Theme = Terminal.getDefaultTheme();
+            end
+            internal.Themes.validate(options.Theme);
+            obj.Theme = options.Theme;
 
             % --- Validate shell if specified, resolve default if not ---
             if obj.Shell ~= ""
@@ -209,7 +237,7 @@ classdef Terminal < handle
                 'MediaType', 'application/json', 'Timeout', 2);
 
             % --- Read MATLAB theme / font settings ---
-            themeConfig = Terminal.buildThemeConfig();
+            themeConfig = internal.Themes.resolve(obj.Theme);
 
             % --- Locate web assets ---
             % extractWebAssets (called above) ensures these exist.
@@ -248,6 +276,17 @@ classdef Terminal < handle
             initTimer = timer('StartDelay', 1.5, ...
                 'TimerFcn', @(t,~) obj.deferredInit(t, themeConfig));
             start(initTimer);
+        end
+
+        function set.Theme(obj, value)
+            internal.Themes.validate(value);
+            obj.Theme = value; %#ok<MCSUP>
+            % Push live update if already initialized.
+            if ~isempty(obj.ThemeConfig) %#ok<MCSUP>
+                newConfig = internal.Themes.resolve(value);
+                obj.ThemeConfig = newConfig; %#ok<MCSUP>
+                obj.sendToJS(struct('type', 'theme', 'theme', newConfig)); %#ok<MCSUP>
+            end
         end
 
         function delete(obj)
@@ -314,7 +353,7 @@ classdef Terminal < handle
                 return;
             end
             obj.LastFigureColor = c;
-            newConfig = Terminal.buildThemeConfig();
+            newConfig = internal.Themes.resolve(obj.Theme);
             obj.ThemeConfig = newConfig;
             obj.sendToJS(struct('type', 'theme', ...
                 'theme', newConfig));
@@ -343,11 +382,13 @@ classdef Terminal < handle
         function pollOutput(obj)
             %POLLOUTPUT Process queued JS messages, then poll for output.
             try
-                % --- Periodic theme change detection ---
-                obj.ThemePollCount = obj.ThemePollCount + 1;
-                if obj.ThemePollCount >= obj.THEME_CHECK_TICKS
-                    obj.ThemePollCount = 0;
-                    obj.checkThemeChanged();
+                % --- Periodic theme change detection (only in auto mode) ---
+                if obj.Theme == "auto"
+                    obj.ThemePollCount = obj.ThemePollCount + 1;
+                    if obj.ThemePollCount >= obj.THEME_CHECK_TICKS
+                        obj.ThemePollCount = 0;
+                        obj.checkThemeChanged();
+                    end
                 end
 
                 % --- Drain outbound queue (JS -> server) ---
@@ -523,6 +564,40 @@ classdef Terminal < handle
             terminals = Terminal.list();
             for i = 1:numel(terminals)
                 delete(terminals(i));
+            end
+        end
+
+        function names = themes()
+            %THEMES List available built-in theme names.
+            %
+            %   Terminal.themes()
+            names = internal.Themes.list();
+        end
+
+        function setDefaultTheme(theme)
+            %SETDEFAULTTHEME Set the default theme for new Terminal instances.
+            %
+            %   Terminal.setDefaultTheme("dracula")
+            %   Terminal.setDefaultTheme("auto")      — reset to default
+            %
+            %   The default theme persists across MATLAB sessions. New
+            %   terminals use this theme unless overridden with Theme=.
+            internal.Themes.validate(theme);
+            if isstruct(theme)
+                setpref('Terminal', 'Theme', theme);
+            else
+                setpref('Terminal', 'Theme', string(theme));
+            end
+        end
+
+        function theme = getDefaultTheme()
+            %GETDEFAULTTHEME Return the current default theme.
+            %
+            %   Terminal.getDefaultTheme()
+            if ispref('Terminal', 'Theme')
+                theme = getpref('Terminal', 'Theme');
+            else
+                theme = "auto";
             end
         end
 
@@ -812,55 +887,6 @@ classdef Terminal < handle
             end
 
             binaryPath = '';
-        end
-
-        function themeConfig = buildThemeConfig()
-            fontFamily = 'Consolas, ''DejaVu Sans Mono'', ''Liberation Mono'', monospace';
-
-            try
-                s = settings;
-                fontSize = s.matlab.fonts.codefont.Size.ActiveValue;
-            catch
-                fontSize = 14;
-            end
-
-            % MATLAB reports font size in points; xterm.js expects CSS
-            % pixels. Convert using screen DPI (pt * PPI/72 = px).
-            try
-                screenPPI = get(groot, 'ScreenPixelsPerInch');
-            catch
-                screenPPI = 96;
-            end
-            fontSize = round(fontSize * screenPPI / 72);
-
-            isDark = false;
-            try
-                % Check default figure background luminance (no side effects).
-                c = get(groot, 'defaultFigureColor');
-                luminance = 0.2126*c(1) + 0.7152*c(2) + 0.0722*c(3);
-                isDark = luminance < 0.5;
-            catch
-            end
-
-            if isDark
-                themeConfig = struct( ...
-                    'isDark', true, ...
-                    'fontFamily', fontFamily, ...
-                    'fontSize', fontSize, ...
-                    'background',  '#1e1e1e', ...
-                    'foreground',  '#d4d4d4', ...
-                    'cursor',      '#aeafad', ...
-                    'selectionBackground', '#264f78');
-            else
-                themeConfig = struct( ...
-                    'isDark', false, ...
-                    'fontFamily', fontFamily, ...
-                    'fontSize', fontSize, ...
-                    'background',  '#ffffff', ...
-                    'foreground',  '#333333', ...
-                    'cursor',      '#333333', ...
-                    'selectionBackground', '#add6ff');
-            end
         end
 
         function shell = defaultShell()

@@ -244,6 +244,22 @@
         // ---------------------
         // Theme
         // ---------------------
+        function hexToRgb(hex) {
+            var result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+            return result ? {
+                r: parseInt(result[1], 16),
+                g: parseInt(result[2], 16),
+                b: parseInt(result[3], 16)
+            } : null;
+        }
+
+        function adjustBrightness(rgb, amount) {
+            var r = Math.max(0, Math.min(255, rgb.r + amount));
+            var g = Math.max(0, Math.min(255, rgb.g + amount));
+            var b = Math.max(0, Math.min(255, rgb.b + amount));
+            return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+        }
+
         function applyTheme(theme) {
             if (!theme) return;
             var root = document.documentElement;
@@ -256,17 +272,52 @@
             if (theme.foreground) root.style.setProperty('--fg-color', theme.foreground);
             if (theme.fontFamily) root.style.setProperty('--font-family', theme.fontFamily);
             if (theme.fontSize) root.style.setProperty('--font-size', theme.fontSize + 'px');
+
+            // Derive tab bar and scrollbar colors from the theme background.
+            if (theme.background) {
+                var rgb = hexToRgb(theme.background);
+                if (rgb) {
+                    if (theme.isDark) {
+                        root.style.setProperty('--tab-bg', adjustBrightness(rgb, 18));
+                        root.style.setProperty('--tab-bg-active', theme.background);
+                        root.style.setProperty('--tab-border', adjustBrightness(rgb, 30));
+                        root.style.setProperty('--tab-fg', adjustBrightness(rgb, 120));
+                        root.style.setProperty('--tab-fg-active', '#ffffff');
+                        root.style.setProperty('--tab-hover-bg', adjustBrightness(rgb, 24));
+                        root.style.setProperty('--scrollbar-thumb', adjustBrightness(rgb, 40));
+                    } else {
+                        root.style.setProperty('--tab-bg', adjustBrightness(rgb, -8));
+                        root.style.setProperty('--tab-bg-active', theme.background);
+                        root.style.setProperty('--tab-border', adjustBrightness(rgb, -18));
+                        root.style.setProperty('--tab-fg', adjustBrightness(rgb, -100));
+                        root.style.setProperty('--tab-fg-active', '#1e1e1e');
+                        root.style.setProperty('--tab-hover-bg', adjustBrightness(rgb, -12));
+                        root.style.setProperty('--scrollbar-thumb', adjustBrightness(rgb, -30));
+                    }
+                }
+            }
         }
 
         function buildXtermTheme(theme) {
             if (!theme) return {};
-            return {
+            var xt = {
                 background: theme.background || '#1e1e1e',
                 foreground: theme.foreground || '#d4d4d4',
                 cursor: theme.cursor || '#ffffff',
-                cursorAccent: theme.background || '#1e1e1e',
+                cursorAccent: theme.cursorAccent || theme.background || '#1e1e1e',
                 selectionBackground: theme.selectionBackground || '#264f78'
             };
+            var ansiKeys = [
+                'black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white',
+                'brightBlack', 'brightRed', 'brightGreen', 'brightYellow',
+                'brightBlue', 'brightMagenta', 'brightCyan', 'brightWhite'
+            ];
+            for (var i = 0; i < ansiKeys.length; i++) {
+                if (theme[ansiKeys[i]]) {
+                    xt[ansiKeys[i]] = theme[ansiKeys[i]];
+                }
+            }
+            return xt;
         }
 
         // ---------------------

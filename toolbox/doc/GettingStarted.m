@@ -31,6 +31,23 @@ t = Terminal(Shell="/bin/bash");
 % t = Terminal(Shell="powershell.exe");
 % t = Terminal(Shell="wsl.exe");
 
+%% Color Themes
+% Terminal follows the MATLAB Desktop theme by default. Choose a preset
+% theme or change themes on the fly.
+
+t = Terminal(Theme="dracula");
+t.Theme = "nord";                  % switch to a different theme
+
+%%
+% List all available preset themes:
+
+Terminal.themes()
+
+%%
+% Set a persistent default theme for all new terminals:
+
+Terminal.setDefaultTheme("dracula")
+
 %% Embedding in an Existing Figure
 % Pass a figure or panel as the first argument to embed a terminal
 % inside your own UI layout.
