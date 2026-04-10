@@ -26,7 +26,9 @@ classdef Terminal < handle
     %     Terminal.version()  — return the installed toolbox version string
     %     Terminal.list()     — return handles to all running terminals
     %     Terminal.closeAll() — close all running terminals
-    %     Terminal.update()   — check for and install the latest version from GitHub
+    %     Terminal.update()          — update to the latest stable release from GitHub
+    %     Terminal.update("1.2.0")  — install a specific version (release candidates too)
+    %     Terminal.versions()       — list available releases on GitHub
     %
     %   Examples:
     %     t = Terminal();
@@ -35,6 +37,8 @@ classdef Terminal < handle
     %     t = Terminal(Shell="powershell.exe");
     %     delete(t);
     %     Terminal.update();
+    %     Terminal.update("0.8.0-rc1");
+    %     Terminal.versions();
 
     properties (Access = private)
         ServerProcess   % struct with fields: pid (double), port (double)
@@ -522,95 +526,156 @@ classdef Terminal < handle
             end
         end
 
-        function update()
-            %UPDATE Check for and install the latest toolbox version from GitHub.
+        function update(version)
+            %UPDATE Check for and install a toolbox version from GitHub.
             %
-            %   Terminal.update()
+            %   Terminal.update()          — update to the latest stable release
+            %   Terminal.update("1.2.0")   — install a specific version
+            %   Terminal.update("v1.2.0")  — "v" prefix is accepted
+            %   Terminal.update("1.2.0-rc1") — release candidates work too
             %
-            %   Queries the latest release from GitHub, displays version
-            %   information, and prompts for confirmation before updating.
+            %   When called without arguments, only releases marked as
+            %   "Latest" on GitHub are considered (pre-releases and drafts
+            %   are skipped). To install a pre-release, specify its version
+            %   explicitly.
+            arguments
+                version (1,1) string = ""
+            end
 
             disp('Checking for updates...');
 
-            % Query GitHub for the latest release.
-            url = sprintf('https://api.github.com/repos/%s/releases/latest', ...
-                Terminal.GITHUB_REPO);
-            try
-                opts = weboptions('ContentType', 'json', 'Timeout', 10);
-                release = webread(url, opts);
-            catch me
-                error('Terminal:UpdateFailed', ...
-                    'Could not reach GitHub:\n  %s', me.message);
+            if version == ""
+                release = Terminal.fetchLatestRelease();
+            else
+                release = Terminal.fetchRelease(version);
             end
 
-            latestVersion = string(release.tag_name);
-            if startsWith(latestVersion, 'v')
-                latestVersion = extractAfter(latestVersion, 1);
-            end
+            targetVersion = Terminal.tagToVersion(release.tag_name);
+            installedVersion = string(Terminal.version());
 
-            disp(['  Installed version: ', Terminal.version()]);
-            disp(['  Latest version:    ', char(latestVersion)]);
+            fprintf('  Installed version: %s\n', installedVersion);
+            fprintf('  Target version:    %s\n', targetVersion);
 
             % Find the .mltbx asset in the release.
-            mltbxURL = '';
-            assets = release.assets;
-            for i = 1:numel(assets)
-                if iscell(assets)
-                    asset = assets{i};
-                else
-                    asset = assets(i);
-                end
-                if endsWith(asset.name, '.mltbx')
-                    mltbxURL = asset.browser_download_url;
-                    break;
-                end
-            end
-            if isempty(mltbxURL)
-                error('Terminal:UpdateFailed', ...
-                    'No .mltbx file found in the latest GitHub release.');
-            end
+            mltbxURL = Terminal.findMltbxAsset(release);
 
             % Ask for confirmation.
-            if latestVersion == Terminal.version()
+            if targetVersion == installedVersion
                 disp('Already up to date.');
                 reply = input('Reinstall current version? (y/n): ', 's');
             else
                 reply = input(sprintf('Update from %s to %s? (y/n): ', ...
-                    Terminal.version(), latestVersion), 's');
+                    installedVersion, targetVersion), 's');
             end
             if ~strcmpi(reply, 'y')
                 disp('Update cancelled.');
                 return;
             end
 
-            % Step 1: Close all open terminals.
-            disp('Step 1/5: Closing all open terminals...');
-            Terminal.closeAll();
-
-            % Step 2: Uninstall current toolbox.
-            disp('Step 2/5: Uninstalling current version...');
-            matlab.addons.uninstall(Terminal.TOOLBOX_ID);
-
-            % Step 3: Clear cached assets.
-            cacheRoot = fullfile(prefdir, 'matlab-terminal');
-            if isfolder(cacheRoot)
-                disp('Step 3/5: Clearing cached assets...');
-                rmdir(cacheRoot, 's');
-            else
-                disp('Step 3/5: No cached assets to clear.');
+            % Step 1: Download BEFORE uninstalling (safe ordering).
+            disp('Step 1/5: Downloading release...');
+            tmpFile = fullfile(tempdir, 'Terminal.mltbx');
+            try
+                websave(tmpFile, mltbxURL);
+            catch me
+                error('Terminal:UpdateFailed', ...
+                    'Download failed (installed version unchanged):\n  %s', me.message);
             end
 
-            % Step 4: Download the latest .mltbx.
-            disp('Step 4/5: Downloading latest release...');
-            tmpFile = fullfile(tempdir, 'Terminal.mltbx');
-            websave(tmpFile, mltbxURL);
+            % Step 2: Close all open terminals.
+            disp('Step 2/5: Closing all open terminals...');
+            Terminal.closeAll();
+
+            % Step 3: Uninstall current toolbox.
+            disp('Step 3/5: Uninstalling current version...');
+            try
+                matlab.addons.uninstall(Terminal.TOOLBOX_ID);
+            catch
+                % May fail if running from source or not installed as toolbox.
+            end
+
+            % Step 4: Clear cached assets.
+            cacheRoot = fullfile(prefdir, 'matlab-terminal');
+            if isfolder(cacheRoot)
+                disp('Step 4/5: Clearing cached assets...');
+                rmdir(cacheRoot, 's');
+            else
+                disp('Step 4/5: No cached assets to clear.');
+            end
 
             % Step 5: Install the new version.
             disp('Step 5/5: Installing new version...');
-            matlab.addons.install(tmpFile);
+            try
+                matlab.addons.install(tmpFile);
+            catch me
+                fprintf(2, 'Installation failed. The .mltbx is saved at:\n  %s\n', tmpFile);
+                fprintf(2, 'You can install it manually: matlab.addons.install("%s")\n', tmpFile);
+                error('Terminal:UpdateFailed', ...
+                    'Installation failed:\n  %s', me.message);
+            end
             delete(tmpFile);
 
-            fprintf('Successfully updated Terminal to version %s.\n', latestVersion);
+            fprintf('Successfully updated Terminal to version %s.\n', targetVersion);
+        end
+
+        function versions()
+            %VERSIONS List available Terminal releases on GitHub.
+            %
+            %   Terminal.versions()
+            %
+            %   Displays a table of available releases with version,
+            %   date, and whether each is a pre-release or the latest.
+
+            url = sprintf('https://api.github.com/repos/%s/releases', ...
+                Terminal.GITHUB_REPO);
+            try
+                opts = weboptions('ContentType', 'json', 'Timeout', 10);
+                releases = webread(url, opts);
+            catch me
+                error('Terminal:VersionsFailed', ...
+                    'Could not reach GitHub:\n  %s', me.message);
+            end
+
+            if isempty(releases)
+                disp('No releases found.');
+                return;
+            end
+
+            installedVersion = string(Terminal.version());
+            fprintf('  Installed: %s\n\n', installedVersion);
+            fprintf('  %-14s %-12s %s\n', 'VERSION', 'DATE', 'LABEL');
+            fprintf('  %-14s %-12s %s\n', '-------', '----', '-----');
+
+            for i = 1:numel(releases)
+                if iscell(releases)
+                    r = releases{i};
+                else
+                    r = releases(i);
+                end
+                v = Terminal.tagToVersion(r.tag_name);
+                % Parse date from ISO 8601 published_at.
+                dateStr = extractBefore(string(r.published_at), 'T');
+
+                labels = {};
+                if isfield(r, 'prerelease') && r.prerelease
+                    labels{end+1} = 'pre-release'; %#ok<AGROW>
+                end
+                if v == installedVersion
+                    labels{end+1} = 'installed'; %#ok<AGROW>
+                end
+                label = strjoin(labels, ', ');
+                fprintf('  %-14s %-12s %s\n', v, dateStr, label);
+            end
+
+            % Identify which is the "Latest" release (what update() would pick).
+            try
+                latestUrl = sprintf('https://api.github.com/repos/%s/releases/latest', ...
+                    Terminal.GITHUB_REPO);
+                latest = webread(latestUrl, opts);
+                latestV = Terminal.tagToVersion(latest.tag_name);
+                fprintf('\n  Latest stable release: %s\n', latestV);
+            catch
+            end
         end
     end
 
@@ -842,6 +907,70 @@ classdef Terminal < handle
                 system(sprintf('taskkill /PID %d /F >nul 2>&1', pid));
             else
                 system(sprintf('kill %d 2>/dev/null', pid));
+            end
+        end
+
+        function release = fetchLatestRelease()
+            %FETCHLATESTRELEASE Fetch the latest stable release from GitHub.
+            %   Uses the /releases/latest endpoint, which excludes
+            %   pre-releases and drafts.
+            url = sprintf('https://api.github.com/repos/%s/releases/latest', ...
+                Terminal.GITHUB_REPO);
+            try
+                opts = weboptions('ContentType', 'json', 'Timeout', 10);
+                release = webread(url, opts);
+            catch me
+                error('Terminal:UpdateFailed', ...
+                    'Could not reach GitHub:\n  %s', me.message);
+            end
+        end
+
+        function release = fetchRelease(version)
+            %FETCHRELEASE Fetch a specific release by version tag.
+            version = string(version);
+            if ~startsWith(version, 'v')
+                tag = "v" + version;
+            else
+                tag = version;
+            end
+            url = sprintf('https://api.github.com/repos/%s/releases/tags/%s', ...
+                Terminal.GITHUB_REPO, tag);
+            try
+                opts = weboptions('ContentType', 'json', 'Timeout', 10);
+                release = webread(url, opts);
+            catch me
+                error('Terminal:UpdateFailed', ...
+                    'Release "%s" not found on GitHub:\n  %s', tag, me.message);
+            end
+        end
+
+        function v = tagToVersion(tag)
+            %TAGTOVERSION Strip leading "v" from a tag name.
+            v = string(tag);
+            if startsWith(v, 'v')
+                v = extractAfter(v, 1);
+            end
+        end
+
+        function mltbxURL = findMltbxAsset(release)
+            %FINDMLTBXASSET Find the .mltbx download URL in a release.
+            mltbxURL = '';
+            assets = release.assets;
+            for i = 1:numel(assets)
+                if iscell(assets)
+                    asset = assets{i};
+                else
+                    asset = assets(i);
+                end
+                if endsWith(asset.name, '.mltbx')
+                    mltbxURL = asset.browser_download_url;
+                    break;
+                end
+            end
+            if isempty(mltbxURL)
+                v = Terminal.tagToVersion(release.tag_name);
+                error('Terminal:UpdateFailed', ...
+                    'No .mltbx file found in release %s.', v);
             end
         end
 
