@@ -40,6 +40,7 @@ classdef Terminal < handle
     %     Terminal.themes()   — list available theme names
     %     Terminal.setDefaultTheme("dracula") — set default for new terminals
     %     Terminal.getDefaultTheme()          — get current default theme
+    %     Terminal.test()          — run the built-in test suite with report
     %
     %   Examples:
     %     t = Terminal();
@@ -273,7 +274,9 @@ classdef Terminal < handle
                 'Position', [0 0 obj.ParentFigure.Position(3) obj.ParentFigure.Position(4)]);
 
             % Clean up when figure is closed.
-            obj.ParentFigure.CloseRequestFcn = @(~,~) delete(obj);
+            if isprop(obj.ParentFigure, 'CloseRequestFcn')
+                obj.ParentFigure.CloseRequestFcn = @(~,~) delete(obj);
+            end
 
             % Register this instance.
             Terminal.registry('add', obj);
@@ -308,7 +311,9 @@ classdef Terminal < handle
                 Terminal.killProcess(obj.ServerProcess.pid);
             end
             if ~isempty(obj.ParentFigure) && isvalid(obj.ParentFigure)
-                obj.ParentFigure.CloseRequestFcn = '';
+                if isprop(obj.ParentFigure, 'CloseRequestFcn')
+                    obj.ParentFigure.CloseRequestFcn = '';
+                end
                 delete(obj.ParentFigure);
             end
         end
@@ -319,6 +324,10 @@ classdef Terminal < handle
             %DEFERREDINIT Called after constructor returns to avoid reentrant callbacks.
             stop(initTimer);
             delete(initTimer);
+
+            if ~isvalid(obj)
+                return;
+            end
 
             obj.ThemeConfig = themeConfig;
             obj.UseEvents = ~isMATLABReleaseOlderThan('R2023a');
@@ -757,6 +766,74 @@ classdef Terminal < handle
                 latestV = Terminal.tagToVersion(latest.tag_name);
                 fprintf('\n  Latest stable release: %s\n', latestV);
             catch
+            end
+        end
+
+        function results = test()
+            %TEST Run the Terminal test suite and produce a report.
+            %
+            %   Terminal.test()
+            %
+            %   Discovers and runs all test classes in the toolbox tests/
+            %   folder. Unit tests run everywhere; integration tests that
+            %   need a display or server binary are skipped automatically
+            %   when those resources are unavailable.
+            %
+            %   Produces an HTML report in a test-results/ folder and
+            %   prints a summary to the command window.
+            %
+            %   results = Terminal.test()   — also returns the TestResult array
+
+            testsDir = fullfile(fileparts(mfilename('fullpath')), 'tests');
+
+            fprintf('\n<strong>Terminal Test Suite v%s</strong>\n\n', Terminal.version());
+
+            % Discover all test classes.
+            suite = matlab.unittest.TestSuite.fromFolder(testsDir);
+            fprintf('Found %d tests in %s\n\n', numel(suite), testsDir);
+
+            % Build runner with plugins.
+            runner = matlab.unittest.TestRunner.withTextOutput('Verbosity', 3);
+
+            % HTML report if available (R2020b+).
+            reportDir = fullfile(pwd, 'test-results');
+            try
+                plugin = matlab.unittest.plugins.HTMLReportPlugin.producingReport(reportDir);
+                if ~isfolder(reportDir)
+                    mkdir(reportDir);
+                end
+                runner.addPlugin(plugin);
+                hasReport = true;
+            catch
+                hasReport = false;
+            end
+
+            % Run.
+            results = runner.run(suite);
+
+            % Summary.
+            nPassed = nnz([results.Passed]);
+            nFailed = nnz([results.Failed]);
+            nIncomplete = nnz([results.Incomplete]);
+            nTotal = numel(results);
+
+            fprintf('\n<strong>Results: %d/%d passed', nPassed, nTotal);
+            if nFailed > 0
+                fprintf(', %d failed', nFailed);
+            end
+            if nIncomplete > 0
+                fprintf(', %d skipped', nIncomplete);
+            end
+            fprintf('</strong>\n');
+
+            if hasReport
+                fprintf('Report: <a href="matlab:web(''%s'',''-browser'')">%s</a>\n', ...
+                    fullfile(reportDir, 'index.html'), reportDir);
+            end
+            fprintf('\n');
+
+            if nargout == 0
+                clear results
             end
         end
     end

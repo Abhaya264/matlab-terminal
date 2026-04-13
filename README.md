@@ -59,6 +59,9 @@ Terminal.version()
 
 % Check for updates and install the latest version from GitHub
 Terminal.update()
+
+% Run the built-in test suite
+Terminal.test()
 ```
 
 | Shortcut | Action |
@@ -294,6 +297,9 @@ matlab-terminal/
 │   ├── openTerminal.m              # Launcher for Apps tab
 │   ├── +internal/                  # Internal package (not user-facing)
 │   │   └── Themes.m               # Theme presets, validation, and resolution
+│   ├── tests/                      # MATLAB test suite (bundled in .mltbx)
+│   │   ├── TestTerminalUnit.m     # Unit tests (no display or server required)
+│   │   └── TestTerminalIntegration.m # Integration tests (require display + binary)
 │   ├── doc/                        # Documentation
 │   │   └── GettingStarted.m       # Getting Started guide (shown on install)
 │   ├── images/                     # Toolbox icon
@@ -312,6 +318,9 @@ matlab-terminal/
 │   ├── shell_unix.go               # Default shell detection (Unix)
 │   ├── shell_windows.go            # Default shell detection (Windows)
 │   ├── auth.go                     # Token validation middleware
+│   ├── auth_test.go                # Auth unit tests
+│   ├── api_test.go                 # API handler unit tests
+│   ├── integration_test.go         # HTTP integration tests
 │   └── go.mod / go.sum             # Go dependencies
 ├── build/                          # Build tooling (not shipped in .mltbx)
 │   ├── build_assets.m              # Bundles web assets + binary into .mat
@@ -371,6 +380,85 @@ See [DESIGN.md](DESIGN.md) for detailed architecture decisions and security anal
    ```
 
 When running from source, `Terminal.m` uses `html/` directly and finds the server binary in `dist/<arch>/`. No `.mat` extraction is needed.
+
+### Testing
+
+Terminal ships with a comprehensive test suite that covers both the Go server and the MATLAB toolbox. Tests are bundled inside the `.mltbx`, so end users can verify their installation without cloning the repository or installing a Go compiler.
+
+#### Running Tests from an Installed Toolbox
+
+After installing `Terminal.mltbx`, run the full test suite from the MATLAB Command Window:
+
+```matlab
+Terminal.test()
+```
+
+This discovers and runs all test classes, prints a verbose summary to the command window, and generates an HTML report in a `test-results/` folder in the current directory:
+
+```
+Terminal Test Suite v0.9.2
+
+Found 62 tests in /path/to/toolbox/tests
+
+Running TestTerminalUnit
+  ...
+Running TestTerminalIntegration
+  ...
+
+Results: 40/62 passed, 22 skipped
+Report: test-results/index.html
+```
+
+To capture the results programmatically:
+
+```matlab
+results = Terminal.test();
+disp(table(results))
+```
+
+#### Test Tiers
+
+| Test class | What it covers | Requirements |
+|---|---|---|
+| `TestTerminalUnit` | Static APIs (`version`, `generateToken`, `themes`, `setDefaultTheme`/`getDefaultTheme`, `list`, `closeAll`), theme validation, theme resolution, token cryptographic strength | MATLAB only — no display, no server binary |
+| `TestTerminalIntegration` | Constructor with all Name-Value pairs (`Name`, `WindowStyle`, `Shell`, `Theme`), parent embedding (`uifigure`, `uipanel`), lifecycle (`delete`, `list`, `closeAll`), live theme switching, default theme inheritance | Display (uifigure) + server binary |
+
+Integration tests skip automatically with a diagnostic message when prerequisites are not met (e.g., headless environment or missing binary). Unit tests always run.
+
+#### Running Tests from a Source Checkout
+
+For developers working from a git clone:
+
+1. Build the Go server for the current platform (see [Development Setup](#development-setup)).
+2. Add the toolbox to the path:
+   ```matlab
+   addpath('toolbox')
+   ```
+3. Run the test suite:
+   ```matlab
+   Terminal.test()
+   ```
+
+   Or run individual test classes:
+   ```matlab
+   runtests('toolbox/tests/TestTerminalUnit.m')
+   runtests('toolbox/tests/TestTerminalIntegration.m')
+   ```
+
+#### Go Server Tests
+
+The Go server has its own test suite that runs in CI on both Linux and Windows:
+
+```bash
+cd server/
+go test -v -count=1 ./...
+```
+
+| Test file | What it covers |
+|---|---|
+| `auth_test.go` | Token validation (exact match, wrong token, empty, case sensitivity, substrings) |
+| `api_test.go` | All HTTP handlers — auth rejection on every endpoint, wrong HTTP method, invalid JSON, oversized request body, poll message filtering, session listing, scrollback, last-activity tracking |
+| `integration_test.go` | Full session lifecycle over HTTP — create, input, poll, resize, scrollback, close, shell exit detection, multi-session isolation |
 
 ### Building a Release
 
