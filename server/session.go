@@ -78,6 +78,18 @@ func (m *SessionManager) Create(shell string, cols, rows uint16, onOutput Output
 	m.sessions[id] = sess
 	m.mu.Unlock()
 
+	// Wait goroutine: detects shell exit and unblocks Read().
+	// On Windows, conpty.Read() never returns EOF when the shell
+	// exits — it blocks forever. Calling Close() after Wait()
+	// returns forces Read() to error out so the read goroutine
+	// can proceed to cleanup. On Unix this is harmless.
+	exitCodeCh := make(chan int, 1)
+	go func() {
+		exitCode, _ := p.Wait()
+		exitCodeCh <- exitCode
+		p.Close()
+	}()
+
 	// Read goroutine: reads PTY output and sends to callback.
 	go func() {
 		buf := make([]byte, 4096)
@@ -97,8 +109,7 @@ func (m *SessionManager) Create(shell string, cols, rows uint16, onOutput Output
 			}
 		}
 
-		// Wait for process to exit and get exit code.
-		exitCode, _ := p.Wait()
+		exitCode := <-exitCodeCh
 
 		m.mu.Lock()
 		delete(m.sessions, id)

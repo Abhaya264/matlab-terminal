@@ -7,12 +7,14 @@ package main
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/UserExistsError/conpty"
 )
 
 type windowsPTY struct {
-	cpty *conpty.ConPty
+	cpty      *conpty.ConPty
+	closeOnce sync.Once
 }
 
 func startPTY(shell string, cols, rows uint16) (ptyProcess, error) {
@@ -31,7 +33,7 @@ func (p *windowsPTY) Resize(cols, rows uint16) error {
 }
 
 func (p *windowsPTY) Close() error {
-	p.cpty.Close()
+	p.closeOnce.Do(func() { p.cpty.Close() })
 	return nil
 }
 
