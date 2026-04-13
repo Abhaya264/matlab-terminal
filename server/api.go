@@ -86,15 +86,15 @@ func (h *APIHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	h.touch()
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req struct {
 		Shell string `json:"shell"`
 		Cols  uint16 `json:"cols"`
 		Rows  uint16 `json:"rows"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		// Allow empty body with defaults.
-		req.Cols = 80
-		req.Rows = 24
+		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		return
 	}
 	if req.Cols == 0 {
 		req.Cols = 80
@@ -139,6 +139,7 @@ func (h *APIHandler) HandleInput(w http.ResponseWriter, r *http.Request) {
 	}
 	h.touch()
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req struct {
 		ID   string `json:"id"`
 		Data string `json:"data"`
@@ -167,6 +168,7 @@ func (h *APIHandler) HandleResize(w http.ResponseWriter, r *http.Request) {
 	}
 	h.touch()
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req struct {
 		ID   string `json:"id"`
 		Cols uint16 `json:"cols"`
@@ -196,6 +198,7 @@ func (h *APIHandler) HandleClose(w http.ResponseWriter, r *http.Request) {
 	}
 	h.touch()
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req struct {
 		ID string `json:"id"`
 	}
@@ -280,7 +283,7 @@ func (h *APIHandler) getMessagesSince(since int64) []outputMessage {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	var result []outputMessage
+	result := make([]outputMessage, 0)
 	for _, msg := range h.outputQueue {
 		if msg.Seq > since {
 			result = append(result, msg)
