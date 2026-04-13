@@ -205,11 +205,46 @@
             }
         }
 
+        // Named event handlers so we can remove them on re-entry.
+        function onInit(event) { handleMATLABMessage({ type: 'init', theme: event.Data }); }
+        function onCreated(event) { handleMATLABMessage(event.Data); }
+        function onBatch(event) { handleMATLABMessage(event.Data); }
+        function onTheme(event) { handleMATLABMessage(event.Data); }
+        function onDataChanged(event) { handleMATLABMessage(event.Data); }
+
         window.setup = function (component) {
             dbg('setup() called by MATLAB');
-            htmlComp = component;
 
-            // Reset state in case this is a reload (undock/move).
+            // Clean up previous state on reload (undock/redock).
+            // Without this, each reload cycle adds duplicate event
+            // listeners and leaks orphaned xterm.js Terminal instances,
+            // causing progressive slowdown.
+
+            // 1. Remove event listeners from previous component.
+            if (htmlComp) {
+                htmlComp.removeEventListener('init', onInit);
+                htmlComp.removeEventListener('created', onCreated);
+                htmlComp.removeEventListener('batch', onBatch);
+                htmlComp.removeEventListener('theme', onTheme);
+                htmlComp.removeEventListener('DataChanged', onDataChanged);
+            }
+
+            // 2. Dispose xterm.js instances and remove DOM elements.
+            for (var id in tabs) {
+                if (tabs[id].terminal) {
+                    tabs[id].terminal.dispose();
+                }
+                if (tabs[id].tab) {
+                    tabs[id].tab.remove();
+                }
+                if (tabs[id].wrapper) {
+                    tabs[id].wrapper.remove();
+                }
+            }
+            tabs = {};
+            activeTabId = null;
+
+            htmlComp = component;
             initialized = false;
 
             // Detect R2023a+ event API.
@@ -218,23 +253,13 @@
 
             if (useEvents) {
                 // R2023a+: listen for named events from MATLAB.
-                component.addEventListener('init', function (event) {
-                    handleMATLABMessage({ type: 'init', theme: event.Data });
-                });
-                component.addEventListener('created', function (event) {
-                    handleMATLABMessage(event.Data);
-                });
-                component.addEventListener('batch', function (event) {
-                    handleMATLABMessage(event.Data);
-                });
-                component.addEventListener('theme', function (event) {
-                    handleMATLABMessage(event.Data);
-                });
+                component.addEventListener('init', onInit);
+                component.addEventListener('created', onCreated);
+                component.addEventListener('batch', onBatch);
+                component.addEventListener('theme', onTheme);
             } else {
                 // Legacy: listen for Data channel changes.
-                component.addEventListener('DataChanged', function (event) {
-                    handleMATLABMessage(event.Data);
-                });
+                component.addEventListener('DataChanged', onDataChanged);
             }
 
             // Tell MATLAB we're ready — triggers (re-)init.
@@ -326,7 +351,12 @@
         function writeOutput(id, base64Data) {
             var entry = tabs[id];
             if (!entry) return;
-            var raw = atob(base64Data);
+            try {
+                var raw = atob(base64Data);
+            } catch (e) {
+                dbg('Failed to decode base64 for ' + id + ': ' + e.message);
+                return;
+            }
             var bytes = new Uint8Array(raw.length);
             for (var i = 0; i < raw.length; i++) {
                 bytes[i] = raw.charCodeAt(i);
@@ -515,12 +545,16 @@
             // Replay scrollback to restore previous output.
             if (scrollbackBase64) {
                 dbg('Replaying scrollback for ' + id + ' (' + scrollbackBase64.length + ' base64 chars)');
-                var raw = atob(scrollbackBase64);
-                var bytes = new Uint8Array(raw.length);
-                for (var j = 0; j < raw.length; j++) {
-                    bytes[j] = raw.charCodeAt(j);
+                try {
+                    var raw = atob(scrollbackBase64);
+                    var bytes = new Uint8Array(raw.length);
+                    for (var j = 0; j < raw.length; j++) {
+                        bytes[j] = raw.charCodeAt(j);
+                    }
+                    terminal.write(bytes);
+                } catch (e) {
+                    dbg('Failed to decode scrollback for ' + id + ': ' + e.message);
                 }
-                terminal.write(bytes);
             }
 
             tabsEl.appendChild(tabEl);
