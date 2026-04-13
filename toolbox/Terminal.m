@@ -133,8 +133,8 @@ classdef Terminal < handle
             end
             obj.ParentFigure = parent;
 
-            % --- Auth token (32-char hex string, no Java) ---
-            obj.AuthToken = sprintf('%04x', randi(65535, 1, 8));
+            % --- Auth token (32-char hex, cryptographically random) ---
+            obj.AuthToken = Terminal.generateToken();
 
             % --- Extract bundled assets if needed ---
             Terminal.extractWebAssets();
@@ -155,8 +155,12 @@ classdef Terminal < handle
 
             % --- Start the server process ---
             readyFile = [tempname, '.txt'];
-            args = sprintf('--token "%s" --env "MATLAB_PID=%s" --env "MATLAB_ROOT=%s" --ready-file "%s"', ...
-                obj.AuthToken, matlabPid, matlabRoot, readyFile);
+            args = sprintf('--env "MATLAB_PID=%s" --env "MATLAB_ROOT=%s" --ready-file "%s"', ...
+                matlabPid, matlabRoot, readyFile);
+
+            % Pass the token via environment variable so it is not visible
+            % in the process list (ps, tasklist, /proc/*/cmdline).
+            setenv('MATLAB_TERMINAL_TOKEN', obj.AuthToken);
 
             logFile = [tempname, '.log'];
             if ispc
@@ -169,6 +173,9 @@ classdef Terminal < handle
             else
                 system(sprintf('"%s" %s > "%s" 2>&1 &', obj.ServerBinary, args, logFile));
             end
+
+            % Clear the env var so it's not inherited by other processes.
+            setenv('MATLAB_TERMINAL_TOKEN', '');
 
             % Wait for the server to write PID and PORT to the ready file.
             % The server writes and closes this file immediately, so there
@@ -997,6 +1004,34 @@ classdef Terminal < handle
                 v = Terminal.tagToVersion(release.tag_name);
                 error('Terminal:UpdateFailed', ...
                     'No .mltbx file found in release %s.', v);
+            end
+        end
+
+        function token = generateToken()
+            %GENERATETOKEN Generate a 32-char hex auth token.
+            %   Uses /dev/urandom (Unix) or PowerShell (Windows) for
+            %   cryptographic randomness, falling back to randi if needed.
+            token = '';
+            try
+                if ispc
+                    [status, token] = system('powershell -c "[guid]::NewGuid().ToString(''N'')"');
+                    if status == 0
+                        token = strtrim(token);
+                    else
+                        token = '';
+                    end
+                else
+                    fid = fopen('/dev/urandom', 'r');
+                    if fid ~= -1
+                        bytes = fread(fid, 16, '*uint8');
+                        fclose(fid);
+                        token = sprintf('%02x', bytes);
+                    end
+                end
+            catch
+            end
+            if strlength(token) ~= 32
+                token = sprintf('%04x', randi(65535, 1, 8));
             end
         end
 

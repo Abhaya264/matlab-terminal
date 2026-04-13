@@ -30,14 +30,20 @@ func main() {
 		readyFile   string
 	)
 
-	flag.StringVar(&token, "token", "", "authentication token (required)")
+	flag.StringVar(&token, "token", "", "authentication token (--token or MATLAB_TERMINAL_TOKEN env var)")
 	flag.Var(&envVars, "env", "environment variable in KEY=VALUE format (repeatable)")
 	flag.DurationVar(&idleTimeout, "idle-timeout", 30*time.Second, "exit after this duration with no connections")
 	flag.StringVar(&readyFile, "ready-file", "", "write PID/PORT to this file on startup (closed immediately)")
 	flag.Parse()
 
+	// Prefer env var over CLI flag to avoid leaking the token in the
+	// process list (ps, tasklist, /proc/*/cmdline).
+	if envToken := os.Getenv("MATLAB_TERMINAL_TOKEN"); envToken != "" {
+		token = envToken
+		os.Unsetenv("MATLAB_TERMINAL_TOKEN")
+	}
 	if token == "" {
-		log.Fatal("--token is required")
+		log.Fatal("--token or MATLAB_TERMINAL_TOKEN is required")
 	}
 
 	// Apply extra environment variables to the current process.
