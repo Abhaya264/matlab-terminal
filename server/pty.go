@@ -8,7 +8,6 @@ type ptyProcess interface {
 	Read(p []byte) (n int, err error)
 	Write(p []byte) (n int, err error)
 	Resize(cols, rows uint16) error
-	Close() error // Close the PTY fd/handle (causes Read to return)
-	Kill() error  // Terminate the child process
+	Close() error // Terminate the child process and close the PTY
 	Wait() (exitCode int, err error)
 }

@@ -144,11 +144,9 @@ func (m *SessionManager) Close(id string) error {
 	}
 	sess.closed = true
 
-	// Close PTY (this will cause the read goroutine to exit).
+	// Terminate the child process and close the PTY. The read goroutine
+	// will see an error and exit, then Wait() handles final cleanup.
 	sess.pty.Close()
-
-	// Signal the process to terminate.
-	sess.pty.Kill()
 
 	return nil
 }

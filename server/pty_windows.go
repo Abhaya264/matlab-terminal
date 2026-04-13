@@ -35,11 +35,6 @@ func (p *windowsPTY) Close() error {
 	return nil
 }
 
-func (p *windowsPTY) Kill() error {
-	p.cpty.Close()
-	return nil
-}
-
 func (p *windowsPTY) Wait() (int, error) {
 	exitCode, err := p.cpty.Wait(context.Background())
 	if err != nil {

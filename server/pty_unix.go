@@ -31,17 +31,15 @@ func startPTY(shell string, cols, rows uint16) (ptyProcess, error) {
 
 func (p *unixPTY) Read(b []byte) (int, error)  { return p.ptmx.Read(b) }
 func (p *unixPTY) Write(b []byte) (int, error) { return p.ptmx.Write(b) }
-func (p *unixPTY) Close() error                { return p.ptmx.Close() }
+func (p *unixPTY) Close() error {
+	if p.cmd.Process != nil {
+		p.cmd.Process.Signal(syscall.SIGTERM)
+	}
+	return p.ptmx.Close()
+}
 
 func (p *unixPTY) Resize(cols, rows uint16) error {
 	return pty.Setsize(p.ptmx, &pty.Winsize{Cols: cols, Rows: rows})
-}
-
-func (p *unixPTY) Kill() error {
-	if p.cmd.Process != nil {
-		return p.cmd.Process.Signal(syscall.SIGTERM)
-	}
-	return nil
 }
 
 func (p *unixPTY) Wait() (int, error) {
