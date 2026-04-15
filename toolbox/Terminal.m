@@ -172,7 +172,11 @@ classdef Terminal < handle
                 fclose(fid);
                 system(sprintf('start "" /b cmd /c call "%s"', batFile));
             else
-                system(sprintf('"%s" %s > "%s" 2>&1 &', obj.ServerBinary, args, logFile));
+                % Use /bin/sh explicitly — MATLAB's system() inherits
+                % the user's login shell, and tcsh/csh don't support
+                % the 2>&1 redirection syntax.
+                cmd = sprintf('"%s" %s > "%s" 2>&1 &', obj.ServerBinary, args, logFile);
+                system(sprintf('/bin/sh -c ''%s''', cmd));
             end
 
             % Clear the env var so it's not inherited by other processes.
@@ -221,19 +225,13 @@ classdef Terminal < handle
                     end
                     delete(logFile);
                 end
-                macHint = '';
-                if ismac
-                    macHint = sprintf(['\n\nOn macOS, Gatekeeper may have blocked the server binary.' ...
-                        '\nTry running this command in a system terminal and then retry:\n' ...
-                        '  xattr -cr "%s"'], fileparts(obj.ServerBinary));
-                end
                 if serverLog ~= ""
                     error('Terminal:NoPort', ...
-                        'Server did not report a port within %d seconds.\nServer output:\n%s%s', ...
-                        maxWait, serverLog, macHint);
+                        'Server did not report a port within %d seconds.\nServer output:\n%s', ...
+                        maxWait, serverLog);
                 else
                     error('Terminal:NoPort', ...
-                        'Server did not report a port within %d seconds.%s', maxWait, macHint);
+                        'Server did not report a port within %d seconds.', maxWait);
                 end
             end
             % Clean up log file on success (server keeps running).
