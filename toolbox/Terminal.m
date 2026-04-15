@@ -709,6 +709,7 @@ classdef Terminal < handle
                     'Installation failed:\n  %s', me.message);
             end
             delete(tmpFile);
+            rehash toolboxcache;
 
             fprintf('Successfully updated Terminal to version %s.\n', targetVersion);
         end
