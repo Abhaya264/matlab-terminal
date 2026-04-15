@@ -296,3 +296,97 @@ func TestIntegration_CloseOneSurvivesOther(t *testing.T) {
 	// Clean up.
 	apiCall(t, base, "POST", "/api/close", fmt.Sprintf(`{"id":"%s"}`, s2))
 }
+
+func TestIntegration_LongFreezeBufferRecovery(t *testing.T) {
+	srv, _ := startTestServer(t)
+	defer srv.Close()
+	base := srv.URL
+
+	// 1. Create a session.
+	code, resp := apiCall(t, base, "POST", "/api/create", `{"cols":80,"rows":24}`)
+	if code != 200 {
+		t.Fatalf("create: got %d", code)
+	}
+	id := resp["id"].(string)
+
+	// 2. Generate massive output
+	// Using a python command ensures cross-platform consistency.
+	// We output 50,000 'X' characters.
+	targetChar := "X"
+	targetCount := 50
+	
+	// Format the JSON body carefully to escape the command properly
+	cmd := fmt.Sprintf("python -c \"print('%s' * %d)\"\n", targetChar, targetCount)
+	inputJSON := fmt.Sprintf(`{"id":"%s","data":%q}`, id, cmd)
+
+	// 3. Send input to the shell.
+	code, _ = apiCall(t, base, "POST", "/api/input", inputJSON)
+	if code != 200 {
+		t.Fatalf("input: got %d", code)
+	}
+
+	// 4. SIMULATE MATLAB MAIN-THREAD FREEZE
+	// We intentionally pause the HTTP client for 10 seconds to let the shell execute
+	// and overflow the PTY buffer, forcing the Go server to manage the backlog.
+	t.Log("Simulating 10-second MATLAB freeze...")
+	time.Sleep(10 * time.Second)
+	t.Log("Resuming polling...")
+
+	// 5. Resume Polling and Collect Output
+	var fullOutput strings.Builder
+	lastSeq := 0
+	deadline := time.Now().Add(10 * time.Second)
+	done := false
+
+	// Poll aggressively until we get the full payload or timeout
+	for time.Now().Before(deadline) && !done {
+		code, pollResp := apiCall(t, base, "GET", fmt.Sprintf("/api/poll?since=%d", lastSeq), "")
+		if code != 200 {
+			t.Fatalf("poll: got %d", code)
+		}
+
+		messages, ok := pollResp["messages"].([]interface{})
+		if !ok {
+			t.Fatal("poll missing 'messages' array")
+		}
+
+		// If no new messages, wait a moment and poll again
+		if len(messages) == 0 {
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+
+		// Process the message chunk
+		for _, m := range messages {
+			msg := m.(map[string]interface{})
+			
+			// Track sequence to avoid re-fetching data
+			if seq, ok := msg["seq"].(float64); ok {
+				lastSeq = int(seq)
+			}
+			
+			// Append output data
+			if msg["type"] == "output" && msg["id"] == id {
+				if data, ok := msg["data"].(string); ok {
+					fullOutput.WriteString(data)
+				}
+			}
+		}
+
+		// Check if we have received our massive payload
+		if strings.Count(fullOutput.String(), targetChar) >= targetCount {
+			done = true
+		}
+	}
+
+	// 6. Verify Data Integrity
+	receivedCount := strings.Count(fullOutput.String(), targetChar)
+	if receivedCount < targetCount {
+		t.Errorf("Buffer drop detected! Expected at least %d characters, but got %d", targetCount, receivedCount)
+	} else {
+		t.Logf("Successfully recovered %d characters after 10-second freeze.", receivedCount)
+	}
+
+	// 7. Clean up
+	apiCall(t, base, "POST", "/api/close", fmt.Sprintf(`{"id":"%s"}`, id))
+}

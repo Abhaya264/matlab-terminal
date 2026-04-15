@@ -388,3 +388,33 @@ func TestLastActivity_UpdatedOnRequest(t *testing.T) {
 		t.Error("LastActivity was not updated after request")
 	}
 }
+
+// --- HandleResize tests ---
+
+func TestResize_NonexistentSession(t *testing.T) {
+	h := newTestHandler()
+
+	req := httptest.NewRequest("POST", "/api/resize", strings.NewReader(`{"id":"bogus","cols":100,"rows":30}`))
+	req.Header = authHeader(testToken)
+	w := httptest.NewRecorder()
+	h.HandleResize(w, req)
+
+	// Attempting to resize a session that doesn't exist should return 404
+	if w.Code != http.StatusNotFound {
+		t.Errorf("got %d, want 404", w.Code)
+	}
+}
+
+func TestResize_InvalidJSON(t *testing.T) {
+	h := newTestHandler()
+
+	req := httptest.NewRequest("POST", "/api/resize", strings.NewReader("{{{"))
+	req.Header = authHeader(testToken)
+	w := httptest.NewRecorder()
+	h.HandleResize(w, req)
+
+	// Malformed JSON should be caught and returned as a bad request
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("got %d, want 400", w.Code)
+	}
+}
