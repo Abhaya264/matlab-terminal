@@ -225,7 +225,7 @@ classdef Terminal < handle
                 if ismac
                     macHint = sprintf(['\n\nOn macOS, Gatekeeper may have blocked the server binary.' ...
                         '\nTry running this command in a system terminal and then retry:\n' ...
-                        '  xattr -d com.apple.quarantine "%s"'], obj.ServerBinary);
+                        '  xattr -cr "%s"'], fileparts(obj.ServerBinary));
                 end
                 if serverLog ~= ""
                     error('Terminal:NoPort', ...
@@ -914,13 +914,19 @@ classdef Terminal < handle
                 fid = fopen(dst, 'w');
                 fwrite(fid, entry.data);
                 fclose(fid);
-                % Make binaries executable and strip quarantine on macOS.
+                % Make binaries executable.
                 if isfield(entry, 'executable') && entry.executable && ~ispc
                     system(sprintf('chmod +x "%s"', dst));
-                    if ismac
-                        system(sprintf('xattr -d com.apple.quarantine "%s" 2>/dev/null', dst));
-                    end
                 end
+            end
+
+            % Strip macOS quarantine attribute from all extracted files.
+            % Downloaded .mltbx files inherit com.apple.quarantine, which
+            % causes Gatekeeper to block the unsigned server binary.
+            % Use -cr (clear, recursive) to silently handle files that
+            % don't have the attribute.
+            if ismac
+                [~, ~] = system(sprintf('xattr -cr "%s"', cacheRoot));
             end
 
             % Touch stamp file so we know this extraction is current.
