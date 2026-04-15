@@ -221,13 +221,19 @@ classdef Terminal < handle
                     end
                     delete(logFile);
                 end
+                macHint = '';
+                if ismac
+                    macHint = sprintf(['\n\nOn macOS, Gatekeeper may have blocked the server binary.' ...
+                        '\nTry running this command in a system terminal and then retry:\n' ...
+                        '  xattr -d com.apple.quarantine "%s"'], obj.ServerBinary);
+                end
                 if serverLog ~= ""
                     error('Terminal:NoPort', ...
-                        'Server did not report a port within %d seconds.\nServer output:\n%s', ...
-                        maxWait, serverLog);
+                        'Server did not report a port within %d seconds.\nServer output:\n%s%s', ...
+                        maxWait, serverLog, macHint);
                 else
                     error('Terminal:NoPort', ...
-                        'Server did not report a port within %d seconds.', maxWait);
+                        'Server did not report a port within %d seconds.%s', maxWait, macHint);
                 end
             end
             % Clean up log file on success (server keeps running).
@@ -908,9 +914,12 @@ classdef Terminal < handle
                 fid = fopen(dst, 'w');
                 fwrite(fid, entry.data);
                 fclose(fid);
-                % Make binaries executable.
+                % Make binaries executable and strip quarantine on macOS.
                 if isfield(entry, 'executable') && entry.executable && ~ispc
                     system(sprintf('chmod +x "%s"', dst));
+                    if ismac
+                        system(sprintf('xattr -d com.apple.quarantine "%s" 2>/dev/null', dst));
+                    end
                 end
             end
 
