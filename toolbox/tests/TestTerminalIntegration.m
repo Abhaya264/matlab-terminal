@@ -217,6 +217,34 @@ classdef TestTerminalIntegration < matlab.unittest.TestCase
             testCase.addTeardown(@() safeDelete(t));
             testCase.verifyEqual(t.Theme, "dracula");
         end
+
+        %% --- UI Layout and State Tests ---
+
+        function testTerminalVisibilityToggle(testCase)
+            % Tests that the terminal does not throw errors when its parent
+            % figure changes visibility state dynamically.
+            fig = uifigure();
+            testCase.addTeardown(@() delete(fig));
+            
+            t = Terminal(fig);
+            testCase.addTeardown(@() safeDelete(t));
+            
+            % Allow time for the server/UI to connect
+            pause(0.5);
+
+            % Hide the parent figure
+            fig.Visible = 'off';
+            pause(0.1); 
+            testCase.verifyEqual(fig.Visible, char('off'));
+
+            % Show it again
+            fig.Visible = 'on';
+            pause(0.1);
+            testCase.verifyEqual(fig.Visible, char('on'));
+            
+            % We verify that the terminal object is still valid and unharmed
+            testCase.verifyTrue(isvalid(t), 'Terminal should remain valid after visibility toggle');
+        end
     end
 end
 
