@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"fmt"
 )
 
 // TestSessionManager_Create tests creating a new session
@@ -409,14 +410,6 @@ func TestSessionManager_InvalidDimensions(t *testing.T) {
 	}
 }
 
-// Copyright 2026 The MathWorks, Inc.
-// package main
-
-// import (
-// 	"sync"
-// 	"testing"
-// )
-
 func TestSessionManager_Concurrency(t *testing.T) {
 	// Setup the manager
 	manager := NewSessionManager(defaultShell())
@@ -430,9 +423,19 @@ func TestSessionManager_Concurrency(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			id, err := manager.Create(80, 24, "")
+			
+			// 1. Define dummy callbacks matching the exact signatures from session.go
+			dummyOut := func(sessionID string, data []byte) {
+				// Do nothing, just safely absorb the output
+			}
+			dummyExit := func(sessionID string, exitCode int) {
+				// Do nothing, just safely absorb the exit event
+			}
+
+			// 2. Pass the dummy functions instead of nil
+			res, err := manager.Create("", 80, 24, dummyOut, dummyExit)
 			if err == nil {
-				ids[idx] = id
+				ids[idx] = res.ID 
 			} else {
 				t.Errorf("Failed to create session concurrently: %v", err)
 			}
@@ -449,10 +452,11 @@ func TestSessionManager_Concurrency(t *testing.T) {
 	for i := 0; i < numRoutines; i++ {
 		wg.Add(1)
 		go func(idx int) {
+			fmt.Printf("Closing session %d\n", idx)
 			defer wg.Done()
 			if ids[idx] != "" {
-				// Verify we can get it
-				if sess := manager.Get(ids[idx]); sess == nil {
+				// Verify we can get it using the unexported get() method
+				if sess := manager.get(ids[idx]); sess == nil {
 					t.Errorf("Failed to get session %s concurrently", ids[idx])
 				}
 				// Close it
