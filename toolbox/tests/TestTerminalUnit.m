@@ -332,9 +332,49 @@ classdef TestTerminalUnit < matlab.unittest.TestCase
             testCase.verifyGreaterThan(config.fontSize, 0);
         end
 
+        function testThemeResolveFontSizeScaling(testCase)
+            % Verify font size is scaled correctly for the current platform.
+            s = settings;
+            ptSize = s.matlab.fonts.codefont.Size.ActiveValue;
+            config = internal.Themes.resolve("dark");
+            if ismac
+                % macOS: font size passes through as-is (Apple convention).
+                testCase.verifyEqual(config.fontSize, ptSize, ...
+                    'On macOS, font size should equal the MATLAB setting directly.');
+            else
+                % Windows/Linux: points converted to CSS pixels via 96/72.
+                testCase.verifyEqual(config.fontSize, round(ptSize * 96 / 72), ...
+                    'On Windows/Linux, font size should be converted via 96/72.');
+            end
+        end
+
         function testThemeResolveFontFamilyContainsMonospace(testCase)
             config = internal.Themes.resolve("dark");
             testCase.verifyTrue(contains(config.fontFamily, 'monospace'));
+        end
+
+        function testThemeResolveFontFamilyIncludesUserFont(testCase)
+            % The resolved font family should start with the user's code font.
+            try
+                s = settings;
+                userFont = char(s.matlab.fonts.codefont.Name.ActiveValue);
+            catch
+                % Cannot read font name — skip this test.
+                testCase.assumeFail('Could not read code font name from MATLAB settings.');
+            end
+            config = internal.Themes.resolve("dark");
+            testCase.verifyTrue(startsWith(config.fontFamily, ['''' userFont '''']), ...
+                sprintf('fontFamily should start with user font "%s", got: %s', ...
+                userFont, config.fontFamily));
+        end
+
+        function testThemeResolveFontFamilyHasFallbacks(testCase)
+            % Even with a user font prepended, the fallback chain must remain.
+            config = internal.Themes.resolve("dark");
+            testCase.verifyTrue(contains(config.fontFamily, 'Consolas'), ...
+                'fontFamily should contain Consolas as fallback.');
+            testCase.verifyTrue(contains(config.fontFamily, 'DejaVu Sans Mono'), ...
+                'fontFamily should contain DejaVu Sans Mono as fallback.');
         end
 
         function testThemeResolveIsDarkMatchesBackground(testCase)

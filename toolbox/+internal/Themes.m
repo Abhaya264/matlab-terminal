@@ -46,20 +46,7 @@ classdef Themes
             %   Handles "auto", named presets, and custom structs.
             %   Adds font settings from MATLAB preferences and computes isDark.
 
-            % --- Font settings (always from MATLAB, not theme) ---
-            fontFamily = 'Consolas, ''DejaVu Sans Mono'', ''Liberation Mono'', monospace';
-            try
-                s = settings;
-                fontSize = s.matlab.fonts.codefont.Size.ActiveValue;
-            catch
-                fontSize = 14;
-            end
-            try
-                screenPPI = get(groot, 'ScreenPixelsPerInch');
-            catch
-                screenPPI = 96;
-            end
-            fontSize = round(fontSize * screenPPI / 72);
+            [fontFamily, fontSize] = internal.Themes.resolveFont();
 
             % --- Resolve colors ---
             presets = internal.Themes.presets();
@@ -139,6 +126,52 @@ classdef Themes
                     error('Terminal:InvalidTheme', ...
                         'Theme field "%s" has invalid value "%s". Use ''#rrggbb'' hex format.', f, val);
                 end
+            end
+        end
+
+        function [fontFamily, fontSize] = resolveFont()
+            %RESOLVEFONT Read font family and size from MATLAB code font settings.
+            %   Returns CSS-ready fontFamily string and fontSize in CSS pixels.
+            %   Falls back to sensible defaults if settings are unavailable.
+            defaultFamily = 'Consolas, ''DejaVu Sans Mono'', ''Liberation Mono'', monospace';
+            fontFamily = defaultFamily;
+            fontSize = 14;
+
+            try
+                s = settings;
+                fontSize = s.matlab.fonts.codefont.Size.ActiveValue;
+            catch e
+                warning('Terminal:FontSettings', ...
+                    'Could not read code font size from MATLAB settings: %s\nUsing default %dpt.', ...
+                    e.message, fontSize);
+            end
+
+            try
+                userFont = char(s.matlab.fonts.codefont.Name.ActiveValue);
+                fontFamily = ['''' userFont ''', ' defaultFamily];
+            catch e
+                warning('Terminal:FontSettings', ...
+                    'Could not read code font name from MATLAB settings: %s\nUsing default font family.', ...
+                    e.message);
+            end
+
+            % Convert typographic points to CSS pixels on platforms that
+            % use standard typographic points (1pt = 1/72 inch).
+            %
+            % macOS: MATLAB follows Apple's convention where font size
+            % values map directly to CSS pixels (rooted in the classic
+            % 72 PPI model).  No conversion needed.
+            %
+            % Windows/Linux: MATLAB uses standard typographic points,
+            % so we convert to CSS pixels (1px = 1/96 inch) via 96/72.
+            %
+            % We intentionally do NOT use ScreenPixelsPerInch here.
+            % The xterm.js fontSize is in CSS pixels, which are
+            % resolution-independent — the browser/webview handles
+            % devicePixelRatio / Retina / HiDPI scaling on its own.
+            % Using platform-reported PPI would double-count that scaling.
+            if ~ismac
+                fontSize = round(fontSize * 96 / 72);
             end
         end
 
