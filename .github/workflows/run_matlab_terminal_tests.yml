@@ -1,0 +1,90 @@
+name: Run MATLAB Terminal Tests
+
+# Allow manual triggering of the workflow with custom inputs
+on:
+  workflow_dispatch:
+    inputs:
+      branch_name:
+        description: 'Branch, tag, or SHA to checkout'
+        required: true
+        default: 'main'
+        type: string
+      matlab_release:
+        description: 'MATLAB Release (e.g., latest, R2024a, R2023b)'
+        required: true
+        default: 'latest'
+        type: choice
+        options:
+          - latest
+          - R2024a
+          - R2023b
+      go_version:
+        description: 'Go Version to use for backend tests'
+        required: true
+        default: '1.22'
+        type: string
+
+jobs:
+  # -------------------------------------------------------------
+  # JOB 1: Test the Go Backend
+  # -------------------------------------------------------------
+  test-go-backend:
+    name: Go Backend Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch_name }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ github.event.inputs.go_version }}
+          cache-dependency-path: server/go.sum
+
+      - name: Run Go Unit & Integration Tests
+        working-directory: ./server
+        run: |
+          go mod tidy
+          go test -v ./... -race -coverprofile=coverage.out
+
+  # -------------------------------------------------------------
+  # JOB 2: Test the MATLAB Frontend
+  # -------------------------------------------------------------
+  test-matlab-frontend:
+    name: MATLAB Frontend Tests
+    # Running on an OS matrix ensures the terminal behavior is correct across platforms
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch_name }}
+
+      - name: Setup MATLAB
+        uses: matlab-actions/setup-matlab@v2
+        with:
+          release: ${{ github.event.inputs.matlab_release }}
+
+      - name: Run MATLAB Tests
+        uses: matlab-actions/run-tests@v2
+        with:
+          # Automatically adds the toolbox folder to the MATLAB path
+          source-folder: toolbox
+          # Specifies the directory containing the test suites
+          select-by-folder: toolbox/tests
+          # Generates standard test results in JUnit format
+          test-results-junit: test-results/results.xml
+
+      - name: Upload Test Results
+        if: always() # Upload results even if tests fail
+        uses: actions/upload-artifact@v4
+        with:
+          name: matlab-test-results-${{ matrix.os }}
+          path: test-results/results.xml
