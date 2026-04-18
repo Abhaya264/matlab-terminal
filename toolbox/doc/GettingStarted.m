@@ -48,6 +48,14 @@ Terminal.themes()
 
 Terminal.setDefaultTheme("dracula")
 
+%% AI Agent Integration (MCP)
+% Share the running MATLAB session with AI coding agents like Claude.
+% Terminal ensures the required toolkit and server binary are available,
+% shares the session, and pre-populates the registration command.
+% Press Enter in the terminal to register, then launch your agent.
+
+t = Terminal(MCP=true);
+
 %% Embedding in an Existing Figure
 % Pass a figure or panel as the first argument to embed a terminal
 % inside your own UI layout.

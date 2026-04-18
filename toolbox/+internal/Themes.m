@@ -59,13 +59,21 @@ classdef Themes
                     colors.(flds{i}) = theme.(flds{i});
                 end
             elseif string(theme) == "auto"
-                % Detect from MATLAB figure background luminance.
+                % Detect dark/light mode.
                 isDark = false;
                 try
-                    c = get(groot, 'defaultFigureColor');
-                    luminance = 0.2126*c(1) + 0.7152*c(2) + 0.0722*c(3);
-                    isDark = luminance < 0.5;
+                    % Preferred: use MATLAB appearance setting (R2025a+).
+                    s = settings;
+                    currentTheme = string(s.matlab.appearance.CurrentTheme.ActiveValue);
+                    isDark = contains(currentTheme, "dark", 'IgnoreCase', true);
                 catch
+                    % Fallback: infer from figure background luminance.
+                    try
+                        c = get(groot, 'defaultFigureColor');
+                        luminance = 0.2126*c(1) + 0.7152*c(2) + 0.0722*c(3);
+                        isDark = luminance < 0.5;
+                    catch
+                    end
                 end
                 if isDark
                     colors = presets.dark;

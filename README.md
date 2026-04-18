@@ -57,6 +57,9 @@ t.Shell
 % Check the installed version
 Terminal.version()
 
+% Share MATLAB session with AI agents via MCP
+t = Terminal(MCP=true);
+
 % Check for updates and install the latest version from GitHub
 Terminal.update()
 
@@ -69,6 +72,47 @@ Terminal.test()
 | Ctrl+Shift+C | Copy selection |
 | Ctrl+Shift+V | Paste |
 | `exit` | Close current terminal tab |
+
+## AI Agent Integration (MCP)
+
+Terminal can share the running MATLAB session with AI coding agents via the [Model Context Protocol (MCP)](https://modelcontextprotocol.io). This allows agents like Claude to evaluate MATLAB code, run files, and interact with the MATLAB editor directly.
+
+```matlab
+t = Terminal(MCP=true);
+```
+
+This does three things:
+
+1. **Ensures the [MATLAB MCP Core Server Toolkit](https://github.com/matlab/matlab-mcp-core-server) is installed.** If not found, Terminal offers to download and install it from GitHub.
+2. **Ensures the `matlab-mcp-core-server` binary is available.** Terminal checks a managed install location (`prefdir/matlab-mcp/`) and the system PATH. If the binary is not found or is older than the minimum required version, Terminal offers to download it.
+3. **Shares the MATLAB session** by calling `shareMATLABSession()` from the toolkit, then pre-populates the MCP server registration command in the terminal. Press Enter to register, then launch your AI agent.
+
+### Editor Tools
+
+Terminal bundles additional MCP tools that give AI agents read-only access to the MATLAB editor. These are registered automatically via the `--extension-file` flag when using `MCP=true`:
+
+| Tool | Description |
+|------|-------------|
+| `matlab_editor_list` | List all files open in the editor with modification status |
+| `matlab_editor_active` | Get the active file, cursor position, and selected text |
+| `matlab_editor_selection` | Get the currently highlighted text |
+| `matlab_editor_read` | Read contents of an open file (reflects unsaved edits) |
+
+These tools are implemented in the `TerminalMCPTools` package and can also be called directly from MATLAB:
+
+```matlab
+TerminalMCPTools.matlab_editor_list()
+TerminalMCPTools.matlab_editor_read("myfile")
+```
+
+### Requirements
+
+- [MATLAB MCP Core Server Toolkit](https://github.com/matlab/matlab-mcp-core-server) (auto-installed on first use)
+- `matlab-mcp-core-server` binary v0.8.0 or later (auto-downloaded on first use)
+
+### How It Works
+
+When you run `Terminal(MCP=true)`, Terminal shares the MATLAB Embedded Connector so that the MCP Core Server can connect to the running MATLAB session using `--matlab-session-mode=existing`. The `--extension-file` flag registers the bundled editor tools with the MCP server. The registration command is pre-populated in the first terminal tab — press Enter to register the MCP server with your AI agent, then start the agent from the same terminal.
 
 ## Updating
 
@@ -106,6 +150,7 @@ matlab.addons.uninstall('Terminal')
 - **Self-updating** — `Terminal.update()` checks GitHub for new releases and walks through the upgrade interactively.
 - **Auto-cleanup** — Closing the last tab closes the window. The server process is terminated when the terminal is deleted or MATLAB exits. An idle timeout acts as a safety net.
 - **Environment variables** — Terminal sessions have `MATLAB_PID` and `MATLAB_ROOT` set, allowing CLI tools to discover the running MATLAB instance.
+- **MCP integration** — `Terminal(MCP=true)` shares the running MATLAB session so AI coding agents (like Claude) can connect to it via the [MATLAB MCP Core Server](https://github.com/matlab/matlab-mcp-core-server). See [AI Agent Integration (MCP)](#ai-agent-integration-mcp) for details.
 - **Event API (R2023a+)** — On R2023a and later, uses `sendEventToHTMLSource`/`HTMLEventReceivedFcn` for reliable keystroke delivery with no data loss. Older releases fall back to the Data channel with buffering.
 - **matlab-proxy compatible** — Works in browser-based MATLAB via [matlab-proxy](https://github.com/mathworks/matlab-proxy).
 - **Zero runtime dependencies** — No Node.js®, Python®, or Java® required. A single Go binary handles all PTY management.
@@ -283,8 +328,6 @@ Terminal.getDefaultTheme()        % returns "dracula"
 Terminal.setDefaultTheme("auto")  % reset to follow MATLAB theme
 ```
 
----
-
 ## Developer Guide
 
 ### Repository Structure
@@ -297,6 +340,12 @@ matlab-terminal/
 │   ├── openTerminal.m              # Launcher for Apps tab
 │   ├── +internal/                  # Internal package (not user-facing)
 │   │   └── Themes.m               # Theme presets, validation, and resolution
+│   ├── +TerminalMCPTools/          # MCP extension tools for AI agent access
+│   │   ├── matlab-editor-tools.json  # Tool definitions for --extension-file
+│   │   ├── matlab_editor_list.m
+│   │   ├── matlab_editor_active.m
+│   │   ├── matlab_editor_read.m
+│   │   └── matlab_editor_selection.m
 │   ├── tests/                      # MATLAB test suite (bundled in .mltbx)
 │   │   ├── TestTerminalUnit.m     # Unit tests (no display or server required)
 │   │   └── TestTerminalIntegration.m # Integration tests (require display + binary)

@@ -6,6 +6,7 @@ classdef Terminal < handle
     %   t = Terminal()                    — docked terminal with default name
     %   t = Terminal(Name="Build")        — docked terminal with custom name
     %   t = Terminal(WindowStyle="normal") — undocked terminal in its own window
+    %   t = Terminal(MCP=true)            — share MATLAB session for AI agents
     %   t = Terminal(parent)              — terminal inside an existing figure/panel
     %   delete(t)                         — closes the terminal and kills the server
     %
@@ -29,6 +30,10 @@ classdef Terminal < handle
     %                   Custom:   struct with fields: background, foreground,
     %                             cursor, selectionBackground, and ANSI colors
     %                             (black, red, green, ..., brightWhite)
+    %     MCP         - Share the running MATLAB session so AI agents can
+    %                   connect to it via the MATLAB MCP Core Server with
+    %                   --matlab-session-mode=existing. Requires the MATLAB
+    %                   MCP Core Server Toolkit. Default: false.
     %
     %   Static methods:
     %     Terminal.version()  — return the installed toolbox version string
@@ -52,6 +57,7 @@ classdef Terminal < handle
     %     t.Theme = "monokai";    % change theme after creation
     %     Terminal.setDefaultTheme("dracula");  % persist across sessions
     %     Terminal.getDefaultTheme();
+    %     t = Terminal(MCP=true);
     %     delete(t);
     %     Terminal.update();
     %     Terminal.update("0.8.0-rc1");
@@ -71,6 +77,9 @@ classdef Terminal < handle
         OutQueue cell = {}  % queued messages from JS to send to server (legacy only)
         UseEvents logical = false  % true if R2023a+ event API is available
         ThemeConfig        % cached theme config for re-init on HTML reload
+        MCPCommand         % command to pre-populate in the first terminal session
+        InitTimer          % one-shot timer for deferred post-constructor init
+        MCPTimer           % one-shot timer for delayed MCP hint
         ThemePollCount double = 0  % tick counter for periodic theme check
         LastFigureColor    % cached groot DefaultFigureColor for change detection
     end
@@ -90,6 +99,14 @@ classdef Terminal < handle
         THEME_CHECK_TICKS = 50     % check theme every 50 ticks (5 seconds)
         TOOLBOX_ID = '9e8f4a2b-3c1d-4e5f-a6b7-8c9d0e1f2a3b'
         GITHUB_REPO = 'prabhakk-mw/matlab-terminal'
+        MCP_TOOLKIT_NAME = 'MATLAB MCP Core Server Toolkit'
+        MCP_TOOLKIT_URL = 'https://github.com/matlab/matlab-mcp-core-server/releases/latest'
+        MCP_GITHUB_API = 'https://api.github.com/repos/matlab/matlab-mcp-core-server/releases/latest'
+        MCP_SERVER_BINARY = 'matlab-mcp-core-server'
+        % Minimum server version required for --matlab-session-mode=existing.
+        % This is a fragile floor check — it guards against stale binaries
+        % but cannot guarantee compatibility with future server versions.
+        MCP_MIN_SERVER_VERSION = '0.8.0'
     end
 
     methods
@@ -101,6 +118,7 @@ classdef Terminal < handle
                 options.WindowStyle (1,1) string {mustBeMember(options.WindowStyle, ["docked", "normal"])} = "docked"
                 options.Shell (1,1) string = ""
                 options.Theme = missing
+                options.MCP (1,1) logical = false
             end
 
             obj.Shell = options.Shell;
@@ -117,6 +135,17 @@ classdef Terminal < handle
                 Terminal.validateShell(obj.Shell);
             else
                 obj.Shell = Terminal.defaultShell();
+            end
+
+            % --- MCP: share MATLAB session for AI agents ---
+            if options.MCP
+                serverBin = Terminal.setupMCP();
+                extensionFile = fullfile( ...
+                    fileparts(which('TerminalMCPTools.matlab_editor_list')), ...
+                    'matlab-editor-tools.json');
+                obj.MCPCommand = sprintf( ...
+                    'claude mcp add --transport stdio matlab -- "%s" --matlab-session-mode=existing --extension-file="%s"', ...
+                    serverBin, extensionFile);
             end
 
             % --- Parent container ---
@@ -287,9 +316,9 @@ classdef Terminal < handle
 
             % Use a one-shot timer to initialize AFTER the constructor returns.
             % This prevents DataChangedFcn from firing during construction.
-            initTimer = timer('StartDelay', 1.5, ...
+            obj.InitTimer = timer('StartDelay', 1.5, ...
                 'TimerFcn', @(t,~) obj.deferredInit(t, themeConfig));
-            start(initTimer);
+            start(obj.InitTimer);
         end
 
         function set.Theme(obj, value)
@@ -306,9 +335,17 @@ classdef Terminal < handle
         function delete(obj)
             %DELETE Clean up: stop timer, kill server, close figure.
             Terminal.registry('remove', obj);
+            if ~isempty(obj.InitTimer) && isvalid(obj.InitTimer)
+                stop(obj.InitTimer);
+                delete(obj.InitTimer);
+            end
             if ~isempty(obj.PollTimer) && isvalid(obj.PollTimer)
                 stop(obj.PollTimer);
                 delete(obj.PollTimer);
+            end
+            if ~isempty(obj.MCPTimer) && isvalid(obj.MCPTimer)
+                stop(obj.MCPTimer);
+                delete(obj.MCPTimer);
             end
             if ~isempty(obj.ServerProcess) && isstruct(obj.ServerProcess) ...
                     && isfield(obj.ServerProcess, 'pid') && ~isnan(obj.ServerProcess.pid)
@@ -328,6 +365,7 @@ classdef Terminal < handle
             %DEFERREDINIT Called after constructor returns to avoid reentrant callbacks.
             stop(initTimer);
             delete(initTimer);
+            obj.InitTimer = [];
 
             if ~isvalid(obj)
                 return;
@@ -514,6 +552,17 @@ classdef Terminal < handle
                     resp = obj.serverPost('/api/create', createReq);
                     if ~isempty(resp) && isfield(resp, 'id')
                         obj.sendToJS(struct('type', 'created', 'id', resp.id));
+                        % Pre-populate MCP registration command in the
+                        % first session. Delayed so the shell prompt is
+                        % ready. Sent without a newline — user hits Enter.
+                        if ~isempty(obj.MCPCommand)
+                            sid = resp.id;
+                            cmd = obj.MCPCommand;
+                            obj.MCPCommand = [];  % only for the first session
+                            obj.MCPTimer = timer('StartDelay', 1.0, ...
+                                'TimerFcn', @(t,~) obj.sendMCPHint(t, sid, cmd));
+                            start(obj.MCPTimer);
+                        end
                     end
                 case 'input'
                     obj.serverPost('/api/input', struct('id', msg.id, 'data', msg.data));
@@ -545,6 +594,20 @@ classdef Terminal < handle
             %SERVERPOST Send a POST request to the Go server.
             url = [obj.BaseURL, endpoint];
             resp = webwrite(url, data, obj.WriteOpts);
+        end
+
+        function sendMCPHint(obj, tmr, sessionId, cmd)
+            %SENDMCPHINT Pre-populate MCP registration command in a session.
+            stop(tmr);
+            delete(tmr);
+            obj.MCPTimer = [];
+            if ~isvalid(obj)
+                return;
+            end
+            try
+                obj.serverPost('/api/input', struct('id', sessionId, 'data', cmd));
+            catch
+            end
         end
 
         function sendToJS(obj, msg)
@@ -844,6 +907,256 @@ classdef Terminal < handle
     end
 
     methods (Static, Access = private)
+        function serverBin = setupMCP()
+            %SETUPMCP Share the MATLAB session for AI agent access.
+            %   Ensures the MCP Core Server Toolkit and server binary are
+            %   available, calls shareMATLABSession(), and returns the
+            %   server binary path for command pre-population.
+
+            % Step 1: Ensure the toolkit is installed.
+            Terminal.ensureMCPToolkit();
+
+            % Step 2: Ensure the server binary is available.
+            serverBin = Terminal.ensureMCPServerBinary();
+
+            % Step 3: Share the session.
+            try
+                shareMATLABSession();
+            catch me
+                error('Terminal:MCPShareFailed', ...
+                    'Failed to share MATLAB session:\n  %s', me.message);
+            end
+
+            fprintf('\nMATLAB session shared for AI agent access.\n');
+            fprintf('The MCP registration command will be pre-populated in the terminal.\n');
+            fprintf('Press Enter to register, then launch your AI agent.\n\n');
+        end
+
+        function ensureMCPToolkit()
+            %ENSUREMCPTOOLKIT Check toolkit is installed; offer to install if not.
+            try
+                addons = matlab.addons.installedAddons;
+                idx = contains(addons.Name, 'MCP Core Server', 'IgnoreCase', true);
+                if any(idx)
+                    return;  % Toolkit is installed.
+                end
+            catch
+                % installedAddons not available — fall back to function check.
+                if exist('shareMATLABSession', 'file') ~= 0
+                    return;
+                end
+            end
+
+            % Toolkit not found — offer to install.
+            fprintf('%s is required for MCP=true.\n', Terminal.MCP_TOOLKIT_NAME);
+            reply = input('Download and install it now? (y/n) [y]: ', 's');
+            if isempty(reply), reply = 'y'; end
+            if ~strcmpi(reply, 'y')
+                error('Terminal:MCPToolkitNotInstalled', ...
+                    ['%s is required for MCP=true.\n\n' ...
+                     'Install manually from:\n  <a href="%s">%s</a>'], ...
+                    Terminal.MCP_TOOLKIT_NAME, ...
+                    Terminal.MCP_TOOLKIT_URL, Terminal.MCP_TOOLKIT_URL);
+            end
+
+            release = Terminal.fetchMCPRelease();
+            mltbxURL = Terminal.findMCPAsset(release, '.mltbx');
+            if isempty(mltbxURL)
+                error('Terminal:MCPDownloadFailed', ...
+                    'No .mltbx asset found in release %s.', release.tag_name);
+            end
+
+            tmpFile = fullfile(tempdir, 'MATLABMCPCoreServerToolkit.mltbx');
+            fprintf('Downloading %s %s...\n', Terminal.MCP_TOOLKIT_NAME, release.tag_name);
+            try
+                websave(tmpFile, mltbxURL);
+            catch me
+                error('Terminal:MCPDownloadFailed', 'Download failed:\n  %s', me.message);
+            end
+
+            fprintf('Installing toolkit...\n');
+            try
+                matlab.addons.install(tmpFile);
+            catch me
+                delete(tmpFile);
+                error('Terminal:MCPInstallFailed', 'Installation failed:\n  %s', me.message);
+            end
+            delete(tmpFile);
+            rehash toolboxcache;
+            fprintf('%s %s installed.\n\n', Terminal.MCP_TOOLKIT_NAME, release.tag_name);
+        end
+
+        function serverBin = ensureMCPServerBinary()
+            %ENSUREMCPSERVERBINARY Find or download the MCP server binary.
+
+            binaryName = Terminal.MCP_SERVER_BINARY;
+            if ispc
+                binaryName = [binaryName '.exe'];
+            end
+
+            % Check our managed install location first.
+            installDir = fullfile(prefdir, 'matlab-mcp');
+            serverBin = fullfile(installDir, binaryName);
+            if isfile(serverBin)
+                if Terminal.checkMCPServerVersion(serverBin)
+                    return;
+                end
+                % Version too old — fall through to download.
+            end
+
+            % Check system PATH.
+            if ispc
+                [status, result] = system(sprintf('where %s 2>nul', binaryName));
+            else
+                [status, result] = system(sprintf('which %s 2>/dev/null', binaryName));
+            end
+            if status == 0
+                found = strtrim(result);
+                % Take only the first line (where may return multiple).
+                lines = splitlines(found);
+                found = lines{1};
+                if Terminal.checkMCPServerVersion(found)
+                    serverBin = found;
+                    return;
+                end
+                % Version too old — fall through to download.
+            end
+
+            % Not found — offer to download.
+            fprintf('MCP server binary not found on PATH or in %s.\n', installDir);
+            fprintf('  Default install location: %s\n\n', serverBin);
+            reply = input('Download it now? (y/n) [y]: ', 's');
+            if isempty(reply), reply = 'y'; end
+            if ~strcmpi(reply, 'y')
+                % Ask for an existing path instead.
+                customPath = input('Enter path to existing matlab-mcp-core-server binary (or empty to cancel): ', 's');
+                customPath = strtrim(customPath);
+                if ~isempty(customPath) && isfile(customPath)
+                    serverBin = customPath;
+                    return;
+                end
+                error('Terminal:MCPBinaryNotFound', ...
+                    ['MCP server binary is required for MCP=true.\n\n' ...
+                     'Download from:\n  <a href="%s">%s</a>'], ...
+                    Terminal.MCP_TOOLKIT_URL, Terminal.MCP_TOOLKIT_URL);
+            end
+
+            % Determine platform asset name.
+            arch = computer('arch');
+            switch arch
+                case 'glnxa64', assetSuffix = '-glnxa64';
+                case 'maca64',  assetSuffix = '-maca64';
+                case 'maci64',  assetSuffix = '-maci64';
+                case 'win64',   assetSuffix = '-win64.exe';
+                otherwise
+                    error('Terminal:MCPUnsupportedPlatform', ...
+                        'Unsupported platform: %s', arch);
+            end
+
+            release = Terminal.fetchMCPRelease();
+            assetName = [Terminal.MCP_SERVER_BINARY assetSuffix];
+            binaryURL = Terminal.findMCPAsset(release, assetName);
+            if isempty(binaryURL)
+                error('Terminal:MCPDownloadFailed', ...
+                    'No binary asset "%s" found in release %s.', assetName, release.tag_name);
+            end
+
+            % Download.
+            if ~isfolder(installDir)
+                mkdir(installDir);
+            end
+            fprintf('Downloading %s %s for %s...\n', ...
+                Terminal.MCP_SERVER_BINARY, release.tag_name, arch);
+            try
+                websave(serverBin, binaryURL);
+            catch me
+                error('Terminal:MCPDownloadFailed', 'Download failed:\n  %s', me.message);
+            end
+
+            % Make executable and strip quarantine on macOS.
+            if ~ispc
+                system(sprintf('chmod +x "%s"', serverBin));
+                if ismac
+                    system(sprintf('xattr -d com.apple.quarantine "%s" 2>/dev/null', serverBin));
+                end
+            end
+            fprintf('MCP server binary installed at:\n  %s\n\n', serverBin);
+        end
+
+        function ok = checkMCPServerVersion(serverBin)
+            %CHECKMCPSERVERVERSION Check binary meets minimum version.
+            %   Returns true if the version is acceptable, false if too old.
+            %   Fragile: assumes --version outputs a semver-like string.
+            ok = false;
+            try
+                [status, output] = system(sprintf('"%s" --version', serverBin));
+                if status ~= 0
+                    warning('Terminal:MCPVersionCheckFailed', ...
+                        'Could not determine MCP server version. Proceeding anyway.');
+                    ok = true;  % Don't block on version check failure.
+                    return;
+                end
+                % Parse version from output (e.g., "matlab-mcp-core-server v0.8.1" or "0.8.1").
+                tokens = regexp(strtrim(output), '(\d+\.\d+\.\d+)', 'tokens', 'once');
+                if isempty(tokens)
+                    warning('Terminal:MCPVersionCheckFailed', ...
+                        'Could not parse MCP server version from: %s', strtrim(output));
+                    ok = true;
+                    return;
+                end
+                ver = tokens{1};
+                if Terminal.compareVersions(ver, Terminal.MCP_MIN_SERVER_VERSION) >= 0
+                    ok = true;
+                else
+                    fprintf('MCP server binary at "%s" is version %s.\n', serverBin, ver);
+                    fprintf('Minimum required version is %s.\n\n', Terminal.MCP_MIN_SERVER_VERSION);
+                end
+            catch
+                ok = true;  % Don't block on unexpected errors.
+            end
+        end
+
+        function result = compareVersions(a, b)
+            %COMPAREVERSIONS Compare two semver strings. Returns -1, 0, or 1.
+            partsA = sscanf(a, '%d.%d.%d')';
+            partsB = sscanf(b, '%d.%d.%d')';
+            for i = 1:3
+                if partsA(i) < partsB(i), result = -1; return; end
+                if partsA(i) > partsB(i), result =  1; return; end
+            end
+            result = 0;
+        end
+
+        function release = fetchMCPRelease()
+            %FETCHMCPRELEASE Fetch the latest MCP Core Server release from GitHub.
+            persistent cachedRelease
+            if ~isempty(cachedRelease)
+                release = cachedRelease;
+                return;
+            end
+            try
+                opts = weboptions('ContentType', 'json', 'Timeout', 10);
+                release = webread(Terminal.MCP_GITHUB_API, opts);
+                cachedRelease = release;
+            catch me
+                error('Terminal:MCPDownloadFailed', ...
+                    ['Could not reach GitHub to check for the MCP Core Server.\n' ...
+                     '  %s\n\nInstall manually from:\n  <a href="%s">%s</a>'], ...
+                    me.message, Terminal.MCP_TOOLKIT_URL, Terminal.MCP_TOOLKIT_URL);
+            end
+        end
+
+        function url = findMCPAsset(release, namePattern)
+            %FINDMCPASSET Find a release asset URL by name pattern.
+            url = '';
+            for i = 1:numel(release.assets)
+                if endsWith(release.assets(i).name, namePattern)
+                    url = release.assets(i).browser_download_url;
+                    return;
+                end
+            end
+        end
+
         function result = registry(action, obj)
             %REGISTRY Persistent store for tracking Terminal instances.
             persistent instances
