@@ -1,0 +1,112 @@
+# Copyright 2026 The MathWorks, Inc.
+
+name: Validate build
+
+on:
+  # Trigger 1: Called from release.yml (Automatic)
+  workflow_call:
+    inputs:
+      matlab_version:
+        type: string
+        default: 'latest'
+      os:
+        type: string
+        default: 'all'
+        
+  # Trigger 2: Manual Execution
+  workflow_dispatch:
+    inputs:
+      build_version:
+        description: 'Release Tag to test (e.g., v0.9.3)'
+        required: true
+        type: string
+      matlab_version:
+        description: 'MATLAB version (e.g., R2024a, R2023b)'
+        required: true
+        default: 'latest'
+        type: string
+      os:
+        description: 'Target OS for testing'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+
+jobs:
+  prepare-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      os_matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Set OS Matrix
+        id: set-matrix
+        run: |
+          if [ "${{ inputs.os }}" == "all" ]; then
+            echo 'matrix=["ubuntu-latest", "windows-latest", "macos-latest"]' >> $GITHUB_OUTPUT
+          else
+            echo 'matrix=["${{ inputs.os }}"]' >> $GITHUB_OUTPUT
+          fi
+
+  smoke-test:
+    needs: prepare-matrix
+    name: Smoke Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(needs.prepare-matrix.outputs.os_matrix) }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # Scenario A: Running Manually -> Download from published GitHub Release
+      - name: Download .mltbx from GitHub Release (Manual)
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download ${{ inputs.build_version }} --pattern "*.mltbx" --dir toolbox_installer
+
+      # Scenario B: Running from release.yml -> Download from temporary CI Artifact
+      - name: Download .mltbx Artifact (Automatic)
+        if: ${{ github.event_name == 'workflow_call' }}
+        uses: actions/download-artifact@v4 # Using v4 as it is standard for current actions
+        with:
+          name: Terminal.mltbx
+          path: toolbox_installer/
+
+      - name: Setup MATLAB
+        uses: matlab-actions/setup-matlab@v2
+        with:
+          release: ${{ inputs.matlab_version }}
+
+      - name: Install Toolbox and Run Smoke Test
+        uses: matlab-actions/run-command@v2
+        with:
+          command: |
+            mltbx_files = dir(fullfile('toolbox_installer', '*.mltbx'));
+            if isempty(mltbx_files)
+                error('No .mltbx file found.');
+            end
+            toolbox_path = fullfile(mltbx_files(1).folder, mltbx_files(1).name);
+            
+            disp(['Installing toolbox: ', toolbox_path]);
+            installedToolbox = matlab.addons.toolbox.installToolbox(toolbox_path);
+            
+            try
+                disp('Instantiating Terminal object...');
+                t = Terminal();
+                assert(isa(t, 'Terminal'), 'Failed to create Terminal object.');
+                disp('Smoke test PASSED.');
+                t.delete();
+            catch ME
+                matlab.addons.toolbox.uninstallToolbox(installedToolbox);
+                rethrow(ME);
+            end
+            
+            matlab.addons.toolbox.uninstallToolbox(installedToolbox);
