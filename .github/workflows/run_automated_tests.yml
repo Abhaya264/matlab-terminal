@@ -58,7 +58,7 @@ jobs:
 
       - name: Run Go Unit and API Tests
         working-directory: ./server
-        run: go test -v -short ./...
+        run: go test -v -count=1 ./...
 
   test-matlab:
     name: MATLAB Frontend Tests
