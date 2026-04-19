@@ -74,7 +74,7 @@ jobs:
 
       # Scenario B: Running from release.yml -> Download from temporary CI Artifact
       - name: Download .mltbx Artifact (Automatic)
-        if: ${{ github.event_name == 'workflow_call' }}
+        if: ${{ github.event_name != 'workflow_dispatch' }}
         uses: actions/download-artifact@v4 # Using v4 as it is standard for current actions
         with:
           name: Terminal.mltbx
