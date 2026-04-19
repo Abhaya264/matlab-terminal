@@ -1,0 +1,90 @@
+# Copyright 2026 The MathWorks, Inc.
+
+name: Run validation Tests
+
+on:
+  workflow_call:
+    inputs:
+      matlab_version:
+        type: string
+        default: 'latest'
+      os:
+        type: string
+        default: 'ubuntu-latest'
+
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch name to test'
+        required: true
+        default: 'main'
+        type: string
+      matlab_version:
+        description: 'MATLAB version (e.g., R2024a, R2023b)'
+        required: true
+        default: 'latest'
+        type: string
+      os:
+        description: 'Target OS for runner'
+        required: true
+        default: 'ubuntu-latest'
+        type: choice
+        options:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+
+jobs:
+  test-go:
+    name: Go Backend Tests
+    runs-on: ${{ inputs.os || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch || github.ref }}
+
+      - name: Fetch Go Version from go.mod
+        id: get-go-version
+        run: |
+          GO_VERSION=$(grep "^go " server/go.mod | awk '{print $2}')
+          echo "version=$GO_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Setup Go Environment
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ steps.get-go-version.outputs.version }}
+          cache-dependency-path: server/go.sum
+
+      - name: Run Go Unit and API Tests
+        working-directory: ./server
+        run: go test -v -short ./...
+
+  test-matlab:
+    name: MATLAB Frontend Tests
+    runs-on: ${{ inputs.os || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch || github.ref }}
+
+      - name: Setup MATLAB
+        uses: matlab-actions/setup-matlab@v2
+        with:
+          release: ${{ inputs.matlab_version || 'latest' }}
+
+      - name: Run MATLAB Tests
+        uses: matlab-actions/run-tests@v2
+        with:
+          source-folder: toolbox
+          select-by-folder: toolbox/tests
+          test-results-junit: test-results/results.xml
+
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: matlab-test-results-${{ matrix.os }}
+          path: test-results/results.xml
+    

@@ -12,6 +12,13 @@ permissions:
   contents: read
 
 jobs:
+  run-validation-tests:
+    name: Validation Tests
+    uses: ./.github/workflows/run_validation_tests.yml
+    with:
+      matlab_version: 'latest'
+      os: 'ubuntu-latest'
+
   build-server:
     name: Build Go Server (${{ matrix.matlab_arch }})
     runs-on: ubuntu-latest

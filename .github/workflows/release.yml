@@ -91,10 +91,18 @@ jobs:
         with:
           name: Terminal.mltbx
           path: dist/Terminal.mltbx
+  
+  validate-build:
+    name: Validate build
+    needs: build-mltbx
+    uses: ./.github/workflows/validate_build.yml
+    with:
+      matlab_version: 'latest'
+      os: 'all'       
 
   release:
     name: Create GitHub Release
-    needs: build-mltbx
+    needs: validate-build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
