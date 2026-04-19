@@ -14,7 +14,7 @@ permissions:
 jobs:
   run-validation-tests:
     name: Validation Tests
-    uses: ./.github/workflows/run_validation_tests.yml
+    uses: ./.github/workflows/run_automated_tests.yml
     with:
       matlab_version: 'latest'
       os: 'ubuntu-latest'
