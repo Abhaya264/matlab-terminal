@@ -51,9 +51,9 @@ jobs:
             echo 'matrix=["${{ inputs.os }}"]' >> $GITHUB_OUTPUT
           fi
 
-  smoke-test:
+  build-test:
     needs: prepare-matrix
-    name: Smoke Test on ${{ matrix.os }}
+    name: Validate build on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -85,7 +85,7 @@ jobs:
         with:
           release: ${{ inputs.matlab_version }}
 
-      - name: Install Toolbox and Run Smoke Test
+      - name: Install Toolbox and Run Test
         uses: matlab-actions/run-command@v2
         with:
           command: |
@@ -102,7 +102,7 @@ jobs:
                 disp('Instantiating Terminal object...');
                 t = Terminal();
                 assert(isa(t, 'Terminal'), 'Failed to create Terminal object.');
-                disp('Smoke test PASSED.');
+                disp('Test PASSED.');
                 t.delete();
             catch ME
                 matlab.addons.toolbox.uninstallToolbox(installedToolbox);

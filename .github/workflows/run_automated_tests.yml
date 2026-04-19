@@ -1,6 +1,6 @@
 # Copyright 2026 The MathWorks, Inc.
 
-name: Run validation Tests
+name: Run automated Tests
 
 on:
   workflow_call:
@@ -20,7 +20,7 @@ on:
         default: 'main'
         type: string
       matlab_version:
-        description: 'MATLAB version (e.g., R2024a, R2023b)'
+        description: 'MATLAB version (e.g., R2025b, R2025a)'
         required: true
         default: 'latest'
         type: string
