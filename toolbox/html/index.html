@@ -12,8 +12,8 @@
     <div id="loading-overlay">
         <div class="loading-content">
             <div class="loading-spinner"></div>
-            <div class="loading-title">Starting Terminal...</div>
-            <div class="loading-shortcuts">
+            <div id="loading-title" class="loading-title">Starting Terminal...</div>
+            <div id="loading-shortcuts" class="loading-shortcuts">
                 <table>
                     <tr><td class="key">Ctrl+Shift+C</td><td>Copy selection</td></tr>
                     <tr><td class="key">Ctrl+Shift+V</td><td>Paste</td></tr>
@@ -156,6 +156,25 @@
                         }
                     }
                     break;
+                case 'restarting':
+                    // Server died — show overlay and prepare for fresh init.
+                    var overlay = document.getElementById('loading-overlay');
+                    if (overlay) {
+                        document.getElementById('loading-title').textContent = 'Restarting Terminal...';
+                        document.getElementById('loading-shortcuts').style.display = 'none';
+                        overlay.classList.remove('hidden');
+                    }
+                    // Dispose all existing tabs — PTY sessions are gone.
+                    for (var rid in tabs) {
+                        if (tabs[rid].terminal) tabs[rid].terminal.dispose();
+                        if (tabs[rid].tab) tabs[rid].tab.remove();
+                        if (tabs[rid].wrapper) tabs[rid].wrapper.remove();
+                    }
+                    tabs = {};
+                    activeTabId = null;
+                    pendingTabs = [];
+                    initialized = false;
+                    break;
                 case 'batch':
                     // Process a batch of messages from MATLAB polling.
                     var msgs = data.messages;
@@ -210,6 +229,7 @@
         function onCreated(event) { handleMATLABMessage(event.Data); }
         function onBatch(event) { handleMATLABMessage(event.Data); }
         function onTheme(event) { handleMATLABMessage(event.Data); }
+        function onRestarting(event) { handleMATLABMessage({ type: 'restarting' }); }
         function onDataChanged(event) { handleMATLABMessage(event.Data); }
 
         window.setup = function (component) {
@@ -226,6 +246,7 @@
                 htmlComp.removeEventListener('created', onCreated);
                 htmlComp.removeEventListener('batch', onBatch);
                 htmlComp.removeEventListener('theme', onTheme);
+                htmlComp.removeEventListener('restarting', onRestarting);
                 htmlComp.removeEventListener('DataChanged', onDataChanged);
             }
 
@@ -257,6 +278,7 @@
                 component.addEventListener('created', onCreated);
                 component.addEventListener('batch', onBatch);
                 component.addEventListener('theme', onTheme);
+                component.addEventListener('restarting', onRestarting);
             } else {
                 // Legacy: listen for Data channel changes.
                 component.addEventListener('DataChanged', onDataChanged);

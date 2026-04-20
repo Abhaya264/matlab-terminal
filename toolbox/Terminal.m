@@ -82,6 +82,8 @@ classdef Terminal < handle
         MCPTimer           % one-shot timer for delayed MCP hint
         ThemePollCount double = 0  % tick counter for periodic theme check
         LastFigureColor    % cached groot DefaultFigureColor for change detection
+        ConsecutivePollFailures double = 0  % poll failure counter for server death detection
+        IsRestarting logical = false  % true while server restart is in progress
     end
 
     properties (SetAccess = private)
@@ -440,6 +442,11 @@ classdef Terminal < handle
         function pollOutput(obj)
             %POLLOUTPUT Process queued JS messages, then poll for output.
             try
+                % Skip normal polling while a restart is in progress.
+                if obj.IsRestarting
+                    return;
+                end
+
                 % --- Periodic theme change detection (only in auto mode) ---
                 if obj.Theme == "auto"
                     obj.ThemePollCount = obj.ThemePollCount + 1;
@@ -471,6 +478,7 @@ classdef Terminal < handle
                 % --- Poll for server output ---
                 url = sprintf('%s/api/poll?since=%d', obj.BaseURL, obj.PollSeq);
                 resp = webread(url, obj.ReadOpts);
+                obj.ConsecutivePollFailures = 0;
                 if isfield(resp, 'messages') && ~isempty(resp.messages)
                     msgs = resp.messages;
                     hasExited = false;
@@ -501,7 +509,117 @@ classdef Terminal < handle
                     end
                 end
             catch
-                % Ignore errors (server may be restarting or session gone).
+                obj.ConsecutivePollFailures = obj.ConsecutivePollFailures + 1;
+                if obj.ConsecutivePollFailures >= 50
+                    obj.tryRestartServer();
+                end
+            end
+        end
+
+        function tryRestartServer(obj)
+            %TRYRESTARTSERVER Detect dead server and relaunch it.
+            %   Called after 5 consecutive poll failures. Checks if the
+            %   server PID is still alive; if not, relaunches the binary
+            %   and lets the existing ready/init flow create fresh sessions.
+            obj.IsRestarting = true;
+            obj.ConsecutivePollFailures = 0;
+
+            % Check if server process is still alive.
+            if ~isempty(obj.ServerProcess) && isstruct(obj.ServerProcess) ...
+                    && isfield(obj.ServerProcess, 'pid') && ~isnan(obj.ServerProcess.pid)
+                if Terminal.isProcessAlive(obj.ServerProcess.pid)
+                    % Server is alive but unresponsive — don't restart.
+                    obj.IsRestarting = false;
+                    return;
+                end
+            end
+
+            % Show restarting overlay in JS.
+            obj.sendToJS(struct('type', 'restarting'));
+
+            % Relaunch the server binary.
+            try
+                matlabPid = num2str(feature('getpid'));
+                matlabRoot = matlabroot;
+                readyFile = [tempname, '.txt'];
+                args = sprintf('--env "MATLAB_PID=%s" --env "MATLAB_ROOT=%s" --ready-file "%s"', ...
+                    matlabPid, matlabRoot, readyFile);
+
+                setenv('MATLAB_TERMINAL_TOKEN', obj.AuthToken);
+
+                logFile = [tempname, '.log'];
+                if ispc
+                    batFile = [tempname, '.bat'];
+                    fid = fopen(batFile, 'w');
+                    fprintf(fid, '@"%s" %s > "%s" 2>&1\n', obj.ServerBinary, args, logFile);
+                    fclose(fid);
+                    system(sprintf('start "" /b cmd /c call "%s"', batFile));
+                else
+                    cmd = sprintf('"%s" %s > "%s" 2>&1 &', obj.ServerBinary, args, logFile);
+                    system(sprintf('/bin/sh -c ''%s''', cmd));
+                end
+
+                setenv('MATLAB_TERMINAL_TOKEN', '');
+
+                % Wait for the server to write PID and PORT.
+                serverPid = [];
+                port = [];
+                maxWait = 5;
+                elapsed = 0;
+                while elapsed < maxWait
+                    pause(0.2);
+                    elapsed = elapsed + 0.2;
+                    if isfile(readyFile)
+                        raw = fileread(readyFile);
+                        pidTok = regexp(raw, 'PID:(\d+)', 'tokens', 'once');
+                        portTok = regexp(raw, 'PORT:(\d+)', 'tokens', 'once');
+                        if ~isempty(pidTok)
+                            serverPid = str2double(pidTok{1});
+                        end
+                        if ~isempty(portTok)
+                            port = str2double(portTok{1});
+                            break;
+                        end
+                    end
+                end
+
+                if isfile(readyFile), delete(readyFile); end
+                if ispc && exist('batFile', 'var') && isfile(batFile)
+                    delete(batFile);
+                end
+
+                if isempty(port)
+                    if ~isempty(serverPid)
+                        Terminal.killProcess(serverPid);
+                    end
+                    obj.IsRestarting = false;
+                    return;
+                end
+
+                obj.ServerProcess = struct('pid', serverPid, 'port', port);
+                obj.BaseURL = sprintf('http://127.0.0.1:%d', port);
+                obj.PollSeq = 0;
+
+                % Update weboptions with same auth token.
+                obj.ReadOpts = weboptions('HeaderFields', {'Authorization', obj.AuthToken}, ...
+                    'Timeout', 2, 'ContentType', 'json');
+                obj.WriteOpts = weboptions('HeaderFields', {'Authorization', obj.AuthToken}, ...
+                    'MediaType', 'application/json', 'Timeout', 2);
+            catch
+                obj.IsRestarting = false;
+                return;
+            end
+
+            obj.IsRestarting = false;
+
+            % Send init directly — the page didn't reload so setup()
+            % won't fire. The 'restarting' handler already reset
+            % initialized=false and disposed old tabs.
+            initData = obj.ThemeConfig;
+            if obj.UseEvents
+                sendEventToHTMLSource(obj.HTMLComponent, 'init', initData);
+            else
+                obj.HTMLComponent.Data = struct('type', 'init', 'theme', initData);
             end
         end
 
@@ -1345,6 +1463,16 @@ classdef Terminal < handle
             else
                 system(sprintf('kill %d 2>/dev/null', pid));
             end
+        end
+
+        function alive = isProcessAlive(pid)
+            %ISPROCESSALIVE Check if a process is still running (cross-platform).
+            if ispc
+                [st, ~] = system(sprintf('tasklist /FI "PID eq %d" /NH 2>nul | findstr /R "^[0-9]" >nul 2>&1', pid));
+            else
+                [st, ~] = system(sprintf('kill -0 %d 2>/dev/null', pid));
+            end
+            alive = (st == 0);
         end
 
         function release = fetchLatestRelease()
