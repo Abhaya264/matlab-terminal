@@ -45,6 +45,7 @@ classdef Terminal < handle
     %     Terminal.themes()   — list available theme names
     %     Terminal.setDefaultTheme("dracula") — set default for new terminals
     %     Terminal.getDefaultTheme()          — get current default theme
+    %     Terminal.verify()         — verify binary integrity against GitHub release
     %     Terminal.test()          — run the built-in test suite with report
     %
     %   Examples:
@@ -62,6 +63,7 @@ classdef Terminal < handle
     %     Terminal.update();
     %     Terminal.update("0.8.0-rc1");
     %     Terminal.versions();
+    %     Terminal.verify();
 
     properties (Access = private)
         ServerProcess   % struct with fields: pid (double), port (double)
@@ -955,6 +957,145 @@ classdef Terminal < handle
             end
         end
 
+        function verify()
+            %VERIFY Verify the installed server binary against the GitHub release.
+            %
+            %   Terminal.verify()
+            %
+            %   Checks the SHA-256 hash of the installed server binary against
+            %   the checksums published on the matching GitHub release. If
+            %   slsa-verifier is available on the system PATH, also performs
+            %   full SLSA provenance verification.
+
+            v = Terminal.version();
+            if v == "0.0.0-dev"
+                fprintf('Skipping verification: running from source (version 0.0.0-dev).\n');
+                return;
+            end
+
+            % Ensure assets are extracted (needed on fresh install).
+            Terminal.extractWebAssets();
+
+            % Locate the installed binary.
+            binaryPath = Terminal.findBinary();
+            if isempty(binaryPath)
+                fprintf(2, 'Server binary not found. Cannot verify.\n');
+                return;
+            end
+            fprintf('Installed version: %s\n', v);
+            fprintf('Binary path:       %s\n\n', binaryPath);
+
+            % Compute local SHA-256.
+            localHash = Terminal.sha256file(binaryPath);
+            fprintf('Local SHA-256:     %s\n', localHash);
+
+            % Determine expected asset name for this platform.
+            arch = computer('arch');
+            switch arch
+                case 'glnxa64', assetName = 'matlab-terminal-server-glnxa64';
+                case 'maci64',  assetName = 'matlab-terminal-server-maci64';
+                case 'maca64',  assetName = 'matlab-terminal-server-maca64';
+                case 'win64',   assetName = 'matlab-terminal-server-win64.exe';
+                otherwise
+                    fprintf(2, 'Unknown platform: %s\n', arch);
+                    return;
+            end
+
+            % Fetch checksums.txt from the matching GitHub release.
+            tag = "v" + v;
+            checksumsURL = sprintf( ...
+                'https://github.com/%s/releases/download/%s/checksums.txt', ...
+                Terminal.GITHUB_REPO, tag);
+            fprintf('Fetching checksums from %s release...\n', tag);
+            try
+                raw = webread(checksumsURL, weboptions('ContentType', 'text', 'Timeout', 10));
+            catch me
+                fprintf(2, 'Could not fetch checksums.txt from release %s:\n  %s\n', tag, me.message);
+                fprintf(2, 'The release may not include checksums (added in v0.11.0).\n');
+                return;
+            end
+
+            % Parse checksums.txt (format: "<hash>  <filename>" per line).
+            lines = splitlines(string(raw));
+            expectedHash = '';
+            for i = 1:numel(lines)
+                line = strtrim(lines(i));
+                if line == ""
+                    continue;
+                end
+                parts = split(line);
+                if numel(parts) >= 2 && parts(2) == assetName
+                    expectedHash = parts(1);
+                    break;
+                end
+            end
+
+            if expectedHash == ""
+                fprintf(2, 'No checksum found for %s in release %s.\n', assetName, tag);
+                return;
+            end
+
+            fprintf('Expected SHA-256:  %s\n\n', expectedHash);
+
+            if strcmpi(localHash, expectedHash)
+                fprintf('PASS: SHA-256 checksum matches the GitHub release.\n');
+            else
+                fprintf(2, 'FAIL: SHA-256 mismatch!\n');
+                fprintf(2, '  Local:    %s\n', localHash);
+                fprintf(2, '  Expected: %s\n', expectedHash);
+                fprintf(2, 'The installed binary does not match the published release.\n');
+                return;
+            end
+
+            % Find or offer to download slsa-verifier.
+            verifierBin = Terminal.findOrInstallSLSAVerifier();
+            if isempty(verifierBin)
+                return;
+            end
+
+            % Download provenance attestation and binary to a temp dir for verification.
+            fprintf('\nRunning SLSA provenance verification...\n');
+            tmpDir = fullfile(tempdir, 'terminal-verify');
+            if isfolder(tmpDir)
+                rmdir(tmpDir, 's');
+            end
+            mkdir(tmpDir);
+
+            try
+                provenanceURL = sprintf( ...
+                    'https://github.com/%s/releases/download/%s/multiple.intoto.jsonl', ...
+                    Terminal.GITHUB_REPO, tag);
+                provenancePath = fullfile(tmpDir, 'multiple.intoto.jsonl');
+                websave(provenancePath, provenanceURL);
+
+                binaryURL = sprintf( ...
+                    'https://github.com/%s/releases/download/%s/%s', ...
+                    Terminal.GITHUB_REPO, tag, assetName);
+                binaryDst = fullfile(tmpDir, assetName);
+                websave(binaryDst, binaryURL);
+
+                cmd = sprintf( ...
+                    '"%s" verify-artifact --provenance-path "%s" --source-uri github.com/%s --source-tag %s "%s" 2>&1', ...
+                    verifierBin, provenancePath, Terminal.GITHUB_REPO, tag, binaryDst);
+                [st, output] = system(cmd);
+                if st == 0
+                    fprintf('PASS: SLSA provenance verification succeeded.\n');
+                    fprintf('%s\n', strtrim(output));
+                else
+                    fprintf(2, 'FAIL: SLSA provenance verification failed.\n');
+                    fprintf(2, '%s\n', strtrim(output));
+                end
+            catch me
+                fprintf(2, 'SLSA verification error: %s\n', me.message);
+            end
+
+            % Clean up.
+            try
+                rmdir(tmpDir, 's');
+            catch
+            end
+        end
+
         function results = test()
             %TEST Run the Terminal test suite and produce a report.
             %
@@ -1475,6 +1616,107 @@ classdef Terminal < handle
             alive = (st == 0);
         end
 
+        function verifierBin = findOrInstallSLSAVerifier()
+            %FINDORINSTALLSLSAVERIFIER Locate slsa-verifier or offer to download it.
+            %   Returns the path to the binary, or '' if unavailable.
+            binaryName = 'slsa-verifier';
+            if ispc
+                binaryName = [binaryName '.exe'];
+            end
+
+            % Check managed install location first.
+            installDir = fullfile(prefdir, 'matlab-terminal', 'bin');
+            candidate = fullfile(installDir, binaryName);
+            if isfile(candidate)
+                verifierBin = candidate;
+                return;
+            end
+
+            % Check system PATH.
+            if ispc
+                [st, result] = system(sprintf('where %s 2>nul', binaryName));
+            else
+                [st, result] = system(sprintf('which %s 2>/dev/null', binaryName));
+            end
+            if st == 0
+                verifierBin = strtrim(splitlines(string(result)));
+                verifierBin = char(verifierBin(1));
+                return;
+            end
+
+            % Not found — offer to download.
+            arch = computer('arch');
+            switch arch
+                case 'glnxa64', assetPattern = 'linux-amd64';
+                case 'maci64',  assetPattern = 'darwin-amd64';
+                case 'maca64',  assetPattern = 'darwin-arm64';
+                case 'win64',   assetPattern = 'windows-amd64.exe';
+                otherwise
+                    fprintf(2, 'Unsupported platform: %s\n', arch);
+                    verifierBin = '';
+                    return;
+            end
+
+            fprintf('\nslsa-verifier not found on PATH or in %s.\n', installDir);
+            fprintf('  Source:      https://github.com/slsa-framework/slsa-verifier/releases\n');
+            fprintf('  Install to:  %s\n\n', candidate);
+            reply = input('Download slsa-verifier for SLSA provenance verification? (y/n) [y]: ', 's');
+            if isempty(reply), reply = 'y'; end
+            if ~strcmpi(reply, 'y')
+                fprintf('Skipping SLSA provenance check.\n');
+                verifierBin = '';
+                return;
+            end
+
+            % Fetch latest release from slsa-verifier repo.
+            try
+                opts = weboptions('ContentType', 'json', 'Timeout', 10);
+                release = webread( ...
+                    'https://api.github.com/repos/slsa-framework/slsa-verifier/releases/latest', opts);
+            catch me
+                fprintf(2, 'Could not fetch slsa-verifier release: %s\n', me.message);
+                verifierBin = '';
+                return;
+            end
+
+            % Find the matching asset.
+            downloadURL = '';
+            for i = 1:numel(release.assets)
+                name = string(release.assets(i).name);
+                if contains(name, assetPattern) && ~contains(name, '.sig') && ~contains(name, '.pem') && ~contains(name, '.intoto')
+                    downloadURL = release.assets(i).browser_download_url;
+                    break;
+                end
+            end
+            if downloadURL == ""
+                fprintf(2, 'No slsa-verifier binary found for %s.\n', arch);
+                verifierBin = '';
+                return;
+            end
+
+            % Download.
+            if ~isfolder(installDir)
+                mkdir(installDir);
+            end
+            fprintf('Downloading slsa-verifier %s...\n', release.tag_name);
+            try
+                websave(candidate, downloadURL);
+            catch me
+                fprintf(2, 'Download failed: %s\n', me.message);
+                verifierBin = '';
+                return;
+            end
+
+            if ~ispc
+                system(sprintf('chmod +x "%s"', candidate));
+                if ismac
+                    system(sprintf('xattr -d com.apple.quarantine "%s" 2>/dev/null', candidate));
+                end
+            end
+            fprintf('Installed slsa-verifier at:\n  %s\n', candidate);
+            verifierBin = candidate;
+        end
+
         function release = fetchLatestRelease()
             %FETCHLATESTRELEASE Fetch the latest stable release from GitHub.
             %   Uses the /releases/latest endpoint, which excludes
@@ -1565,6 +1807,28 @@ classdef Terminal < handle
             if strlength(token) ~= 32
                 token = sprintf('%04x', randi(65535, 1, 8));
             end
+        end
+
+        function hash = sha256file(filepath)
+            %SHA256FILE Compute the SHA-256 hex digest of a file.
+            if ispc
+                [st, out] = system(sprintf('certutil -hashfile "%s" SHA256', filepath));
+                if st == 0
+                    lines = splitlines(strtrim(out));
+                    % certutil outputs: header, hash, footer
+                    hash = strtrim(strrep(lines{2}, ' ', ''));
+                    return;
+                end
+            else
+                [st, out] = system(sprintf('sha256sum "%s"', filepath));
+                if st == 0
+                    parts = split(strtrim(out));
+                    hash = char(parts(1));
+                    return;
+                end
+            end
+            error('Terminal:HashFailed', ...
+                'Could not compute SHA-256 hash for:\n  %s', filepath);
         end
 
     end

@@ -10,31 +10,11 @@ permissions:
   contents: write
 
 jobs:
-  build-server:
-    name: Build Go Server (${{ matrix.goos }}/${{ matrix.goarch }})
+  build:
+    name: Build All Artifacts
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - goos: linux
-            goarch: amd64
-            matlab_arch: glnxa64
-            binary: matlab-terminal-server
-          - goos: darwin
-            goarch: amd64
-            matlab_arch: maci64
-            binary: matlab-terminal-server
-          - goos: darwin
-            goarch: arm64
-            matlab_arch: maca64
-            binary: matlab-terminal-server
-          - goos: windows
-            goarch: amd64
-            matlab_arch: win64
-            binary: matlab-terminal-server.exe
-    defaults:
-      run:
-        working-directory: server
+    outputs:
+      digests: ${{ steps.checksums.outputs.digests }}
     steps:
       - uses: actions/checkout@v6
 
@@ -43,42 +23,26 @@ jobs:
           go-version: '1.21'
           cache: false
 
-      - name: Build
+      - name: Cross-compile Go server
+        working-directory: server
         run: |
-          mkdir -p ../dist/${{ matrix.matlab_arch }}
-          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
-            go build -ldflags="-s -w" \
-            -o ../dist/${{ matrix.matlab_arch }}/${{ matrix.binary }} .
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: server-${{ matrix.matlab_arch }}
-          path: dist/${{ matrix.matlab_arch }}/
-
-  build-mltbx:
-    name: Package Terminal.mltbx
-    needs: build-server
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Download all server binaries
-        uses: actions/download-artifact@v8
-        with:
-          pattern: server-*
-          path: dist/
-          merge-multiple: false
-
-      - name: Arrange binaries into dist/<arch>/
-        run: |
-          for dir in dist/server-*/; do
-            arch=$(basename "$dir" | sed 's/^server-//')
-            mkdir -p "dist/$arch"
-            cp "$dir"/* "dist/$arch/"
+          platforms=(
+            "linux   amd64 glnxa64 matlab-terminal-server"
+            "darwin  amd64 maci64  matlab-terminal-server"
+            "darwin  arm64 maca64  matlab-terminal-server"
+            "windows amd64 win64   matlab-terminal-server.exe"
+          )
+          for entry in "${platforms[@]}"; do
+            read -r goos goarch arch binary <<< "$entry"
+            mkdir -p ../dist/$arch
+            echo "Building $goos/$goarch -> dist/$arch/$binary"
+            GOOS=$goos GOARCH=$goarch \
+              go build -ldflags="-s -w" \
+              -o ../dist/$arch/$binary .
           done
-          chmod +x dist/*/matlab-terminal-server 2>/dev/null || true
+          chmod +x ../dist/*/matlab-terminal-server 2>/dev/null || true
           echo "--- dist/ layout ---"
-          find dist -type f
+          find ../dist -type f
 
       - name: Set up MATLAB
         uses: matlab-actions/setup-matlab@v3
@@ -88,24 +52,59 @@ jobs:
         with:
           command: addpath('build'); package("${{ github.ref_name }}")
 
+      - name: Compute checksums
+        id: checksums
+        run: |
+          # Collect all release artifacts.
+          mkdir -p release-assets
+          cp dist/glnxa64/matlab-terminal-server  release-assets/matlab-terminal-server-glnxa64
+          cp dist/maci64/matlab-terminal-server   release-assets/matlab-terminal-server-maci64
+          cp dist/maca64/matlab-terminal-server    release-assets/matlab-terminal-server-maca64
+          cp dist/win64/matlab-terminal-server.exe release-assets/matlab-terminal-server-win64.exe
+          cp dist/Terminal.mltbx                   release-assets/Terminal.mltbx
+
+          # Generate checksums file for the release.
+          cd release-assets
+          sha256sum * > checksums.txt
+          cat checksums.txt
+
+          # Base64-encoded digests for SLSA provenance generator.
+          digests=$(sha256sum * | base64 -w0)
+          echo "digests=$digests" >> "$GITHUB_OUTPUT"
+
       - uses: actions/upload-artifact@v7
         with:
-          name: Terminal.mltbx
-          path: dist/Terminal.mltbx
+          name: release-assets
+          path: release-assets/
+
+  provenance:
+    name: Generate SLSA Provenance
+    needs: build
+    permissions:
+      actions: read
+      id-token: write
+      contents: write
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    with:
+      base64-subjects: "${{ needs.build.outputs.digests }}"
+      upload-assets: true
 
   release:
     name: Create GitHub Release
-    needs: build-mltbx
+    needs: [build, provenance]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - name: Download .mltbx
+      - name: Download release assets
         uses: actions/download-artifact@v8
         with:
-          name: Terminal.mltbx
+          name: release-assets
+          path: release-assets/
 
       - name: Generate release notes
         run: |
@@ -137,7 +136,7 @@ jobs:
       - name: Create release
         uses: softprops/action-gh-release@v3
         with:
-          files: Terminal.mltbx
+          files: release-assets/*
           body_path: release_notes.md
           generate_release_notes: true
           prerelease: ${{ steps.release-type.outputs.prerelease }}
