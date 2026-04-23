@@ -79,7 +79,7 @@ function package(toolboxVersion)
     opts.MaximumMatlabRelease = '';
     opts.ToolboxMatlabPath = toolboxDir;
     opts.ToolboxImageFile = fullfile(toolboxDir, 'images', 'matlab-terminal.jpeg');
-    opts.ToolboxGettingStartedGuide = fullfile(toolboxDir, 'doc', 'GettingStarted.m');
+    opts.ToolboxGettingStartedGuide = fullfile(toolboxDir, 'doc', 'GettingStarted.mlx');
     opts.AppGalleryFiles = fullfile(toolboxDir, 'openTerminal.m');
     opts.OutputFile = outputFile;
 
