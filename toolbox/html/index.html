@@ -727,6 +727,41 @@
         });
 
         // ---------------------
+        // ESC Key Passthrough
+        // ---------------------
+        // In matlab-proxy (browser-based MATLAB), the parent frame
+        // intercepts ESC for its own UI (dismiss dialogs, menus).
+        // This prevents ESC from reaching xterm.js, which breaks TUI
+        // apps like Claude Code that rely on ESC for navigation.
+        // Capture ESC early and stop it from propagating to the parent.
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && activeTabId && tabs[activeTabId] && !tabs[activeTabId].exited) {
+                e.stopPropagation();
+                e.preventDefault();
+                bufferInput(activeTabId, '\x1b');
+            }
+        }, true);  // capture phase — runs before any other handler
+
+        // ---------------------
+        // Focus Recovery
+        // ---------------------
+        // In browser-based environments (matlab-proxy), xterm.js can lose
+        // focus when TUI apps (like Claude's /mcp view) trigger rapid screen
+        // updates through the nested iframe chain.  Re-focus the active
+        // terminal on any click or when the document/window regains focus.
+        function refocusActiveTerminal() {
+            if (activeTabId && tabs[activeTabId] && !tabs[activeTabId].exited) {
+                // In nested iframes (matlab-proxy), the iframe itself must
+                // have focus before xterm's hidden textarea can receive keys.
+                try { window.focus(); } catch (e) {}
+                tabs[activeTabId].terminal.focus();
+            }
+        }
+        document.addEventListener('click', refocusActiveTerminal);
+        window.addEventListener('focus', refocusActiveTerminal);
+        document.addEventListener('focusin', refocusActiveTerminal);
+
+        // ---------------------
         // Resize Handling
         // ---------------------
         var resizeObserver = new ResizeObserver(function () {

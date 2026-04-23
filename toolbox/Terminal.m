@@ -1,12 +1,11 @@
-% Copyright 2026 The MathWorks, Inc.
-
 classdef Terminal < handle
     %TERMINAL Embeds a system terminal inside a MATLAB figure using uihtml.
     %
     %   t = Terminal()                    — docked terminal with default name
     %   t = Terminal(Name="Build")        — docked terminal with custom name
     %   t = Terminal(WindowStyle="normal") — undocked terminal in its own window
-    %   t = Terminal(MCP=true)            — share MATLAB session for AI agents
+    %   t = Terminal(MCP=true)            — share MATLAB session for AI agents (Claude)
+    %   t = Terminal(Agentic=true)       — full agent integration with MathWorks toolkits
     %   t = Terminal(parent)              — terminal inside an existing figure/panel
     %   delete(t)                         — closes the terminal and kills the server
     %
@@ -34,6 +33,15 @@ classdef Terminal < handle
     %                   connect to it via the MATLAB MCP Core Server with
     %                   --matlab-session-mode=existing. Requires the MATLAB
     %                   MCP Core Server Toolkit. Default: false.
+    %     Agentic     - Full agent integration with MathWorks Agentic Toolkits.
+    %                   Sets up the MCP Core Server, downloads the MATLAB and/or
+    %                   Simulink Agentic Toolkits, and registers with your AI
+    %                   agent. First run prompts a setup wizard; preferences are
+    %                   saved for subsequent runs. Mutually exclusive with MCP.
+    %                   Default: false.
+    %     AgentOptions - Struct to skip the wizard. Fields:
+    %                     Agent    - "claude"|"codex"|"copilot"|"gemini"|"cursor"|"amp"
+    %                     Toolkits - ["matlab"] or ["simulink"] or ["matlab","simulink"]
     %
     %   Static methods:
     %     Terminal.version()  — return the installed toolbox version string
@@ -47,6 +55,10 @@ classdef Terminal < handle
     %     Terminal.getDefaultTheme()          — get current default theme
     %     Terminal.verify()         — verify binary integrity against GitHub release
     %     Terminal.test()          — run the built-in test suite with report
+    %     Terminal.setAgentOptions(opts)    — save agent preferences
+    %     Terminal.getAgentOptions()        — retrieve saved agent preferences
+    %     Terminal.resetAgentOptions()      — clear preferences, re-run wizard
+    %     Terminal.updateAgenticToolkit()   — update installed agentic toolkit(s)
     %
     %   Examples:
     %     t = Terminal();
@@ -59,11 +71,18 @@ classdef Terminal < handle
     %     Terminal.setDefaultTheme("dracula");  % persist across sessions
     %     Terminal.getDefaultTheme();
     %     t = Terminal(MCP=true);
+    %     t = Terminal(Agentic=true);
+    %     t = Terminal(Agentic=true, AgentOptions=struct('Agent',"claude",'Toolkits',["matlab"]));
+    %     Terminal.setAgentOptions(struct('Agent',"gemini",'Toolkits',["matlab","simulink"]));
+    %     Terminal.resetAgentOptions();
     %     delete(t);
     %     Terminal.update();
     %     Terminal.update("0.8.0-rc1");
     %     Terminal.versions();
     %     Terminal.verify();
+
+    % Copyright 2026 The MathWorks, Inc.
+
 
     properties (Access = private)
         ServerProcess   % struct with fields: pid (double), port (double)
@@ -111,6 +130,11 @@ classdef Terminal < handle
         % This is a fragile floor check — it guards against stale binaries
         % but cannot guarantee compatibility with future server versions.
         MCP_MIN_SERVER_VERSION = '0.8.0'
+        % Agentic Toolkit constants
+        AGENTIC_INSTALL_DIR = 'agentic-toolkit'  % under prefdir/Terminal/
+        AGENTIC_MATLAB_REPO = 'matlab/matlab-agentic-toolkit'
+        AGENTIC_SIMULINK_REPO = 'matlab/simulink-agentic-toolkit'
+        AGENTIC_SUPPORTED_AGENTS = ["claude","amp","gemini","cursor","codex","copilot"]
     end
 
     methods
@@ -123,6 +147,8 @@ classdef Terminal < handle
                 options.Shell (1,1) string = ""
                 options.Theme = missing
                 options.MCP (1,1) logical = false
+                options.Agentic (1,1) logical = false
+                options.AgentOptions struct = struct()
             end
 
             obj.Shell = options.Shell;
@@ -141,6 +167,12 @@ classdef Terminal < handle
                 obj.Shell = Terminal.defaultShell();
             end
 
+            % --- Agentic and MCP are mutually exclusive ---
+            if options.Agentic && options.MCP
+                error('Terminal:InvalidOptions', ...
+                    'Agentic=true and MCP=true are mutually exclusive.\nUse Agentic=true for full agent integration.');
+            end
+
             % --- MCP: share MATLAB session for AI agents ---
             if options.MCP
                 serverBin = Terminal.setupMCP();
@@ -150,6 +182,41 @@ classdef Terminal < handle
                 obj.MCPCommand = sprintf( ...
                     'claude mcp add --transport stdio matlab -- "%s" --matlab-session-mode=existing --extension-file="%s"', ...
                     serverBin, extensionFile);
+            end
+
+            % --- Agentic: full agent integration with toolkits ---
+            if options.Agentic
+                % Phase 1: MCP Core Server (reuse existing infrastructure)
+                serverBin = Terminal.setupMCP();
+
+                % Phase 2: Agent options (saved prefs, explicit, or wizard)
+                if ~isempty(fieldnames(options.AgentOptions))
+                    agentOpts = options.AgentOptions;
+                    Terminal.validateAgentOptions(agentOpts);
+                    Terminal.setAgentOptions(agentOpts);
+                elseif ispref('Terminal', 'AgentOptions')
+                    agentOpts = Terminal.getAgentOptions();
+                else
+                    agentOpts = Terminal.agenticWizard();
+                end
+
+                % Phase 3: Agentic Toolkits
+                toolkitPaths = struct();
+                toolkits = string(agentOpts.Toolkits);
+                if ismember("matlab", toolkits)
+                    toolkitPaths.matlab = Terminal.ensureAgenticToolkit("matlab");
+                end
+                if ismember("simulink", toolkits)
+                    toolkitPaths.simulink = Terminal.ensureAgenticToolkit("simulink");
+                    Terminal.initializeSimulinkToolkit(toolkitPaths.simulink);
+                end
+
+                % Phase 4: Build merged extension file
+                extensionFile = Terminal.mergeExtensionFiles(toolkits, toolkitPaths);
+
+                % Phase 5: Register with agent
+                obj.MCPCommand = Terminal.buildAgentRegistration( ...
+                    agentOpts.Agent, serverBin, extensionFile, toolkitPaths);
             end
 
             % --- Parent container ---
@@ -758,6 +825,64 @@ classdef Terminal < handle
             %
             %   Returns a (possibly empty) array of Terminal handles.
             terminals = Terminal.registry('get');
+        end
+
+        function setAgentOptions(opts)
+            %SETAGENTOPTIONS Save agent preferences for Agentic=true.
+            %
+            %   Terminal.setAgentOptions(struct('Agent',"claude",'Toolkits',["matlab"]))
+            %
+            %   Persists across MATLAB sessions. Used automatically by
+            %   Terminal(Agentic=true) on subsequent runs.
+            Terminal.validateAgentOptions(opts);
+            setpref('Terminal', 'AgentOptions', opts);
+        end
+
+        function opts = getAgentOptions()
+            %GETAGENTOPTIONS Retrieve saved agent preferences.
+            %
+            %   opts = Terminal.getAgentOptions()
+            if ispref('Terminal', 'AgentOptions')
+                opts = getpref('Terminal', 'AgentOptions');
+            else
+                error('Terminal:NoAgentOptions', ...
+                    'No saved agent options. Run Terminal(Agentic=true) to configure.');
+            end
+        end
+
+        function resetAgentOptions()
+            %RESETAGENTOPTIONS Clear saved agent preferences.
+            %
+            %   Terminal.resetAgentOptions()
+            %
+            %   Next call to Terminal(Agentic=true) will re-run the setup wizard.
+            if ispref('Terminal', 'AgentOptions')
+                rmpref('Terminal', 'AgentOptions');
+            end
+            fprintf('Agent options cleared. Next Terminal(Agentic=true) will re-run setup.\n');
+        end
+
+        function updateAgenticToolkit(toolkit)
+            %UPDATEAGENTICTOOLKIT Update installed agentic toolkit(s) to latest.
+            %
+            %   Terminal.updateAgenticToolkit()            % update all
+            %   Terminal.updateAgenticToolkit("matlab")    % update MATLAB only
+            %   Terminal.updateAgenticToolkit("simulink")  % update Simulink only
+            arguments
+                toolkit string = ""
+            end
+            if toolkit == ""
+                % Update all installed toolkits.
+                baseDir = fullfile(prefdir, 'Terminal', Terminal.AGENTIC_INSTALL_DIR);
+                if isfolder(fullfile(baseDir, 'matlab'))
+                    Terminal.ensureAgenticToolkit("matlab", true);
+                end
+                if isfolder(fullfile(baseDir, 'simulink'))
+                    Terminal.ensureAgenticToolkit("simulink", true);
+                end
+            else
+                Terminal.ensureAgenticToolkit(toolkit, true);
+            end
         end
 
         function closeAll()
@@ -1413,6 +1538,752 @@ classdef Terminal < handle
                     url = release.assets(i).browser_download_url;
                     return;
                 end
+            end
+        end
+
+        % ===============================================================
+        % Agentic Toolkit Methods
+        % ===============================================================
+
+        function validateAgentOptions(opts)
+            %VALIDATEAGENTOPTIONS Validate an AgentOptions struct.
+            if ~isstruct(opts)
+                error('Terminal:InvalidAgentOptions', 'AgentOptions must be a struct.');
+            end
+            if ~isfield(opts, 'Agent')
+                error('Terminal:InvalidAgentOptions', 'AgentOptions must have an Agent field.');
+            end
+            if ~isfield(opts, 'Toolkits')
+                error('Terminal:InvalidAgentOptions', 'AgentOptions must have a Toolkits field.');
+            end
+            agent = string(opts.Agent);
+            if ~ismember(agent, Terminal.AGENTIC_SUPPORTED_AGENTS)
+                error('Terminal:InvalidAgentOptions', ...
+                    'Unsupported agent "%s".\nSupported: %s', ...
+                    agent, strjoin(Terminal.AGENTIC_SUPPORTED_AGENTS, ", "));
+            end
+            toolkits = string(opts.Toolkits);
+            valid = ["matlab", "simulink"];
+            bad = toolkits(~ismember(toolkits, valid));
+            if ~isempty(bad)
+                error('Terminal:InvalidAgentOptions', ...
+                    'Unsupported toolkit "%s".\nSupported: %s', ...
+                    bad(1), strjoin(valid, ", "));
+            end
+        end
+
+        function opts = agenticWizard()
+            %AGENTICWIZARD Interactive first-run setup for Agentic=true.
+            fprintf('\n');
+            fprintf('Agentic Toolkit Setup\n');
+            fprintf('======================\n\n');
+
+            % --- Agent selection ---
+            agents = Terminal.AGENTIC_SUPPORTED_AGENTS;
+            labels = ["Claude Code", "Sourcegraph Amp", "Gemini CLI", ...
+                      "Cursor (untested)", "OpenAI Codex (untested)", ...
+                      "GitHub Copilot (untested)"];
+            fprintf('Which AI agent are you using?\n');
+            for i = 1:numel(agents)
+                fprintf('  [%d] %s\n', i, labels(i));
+            end
+            reply = input(sprintf('  Select [1]: '), 's');
+            if isempty(reply)
+                idx = 1;
+            else
+                idx = str2double(reply);
+            end
+            if isnan(idx) || idx < 1 || idx > numel(agents) || floor(idx) ~= idx
+                error('Terminal:InvalidSelection', 'Invalid selection.');
+            end
+            agent = agents(idx);
+            fprintf('  Selected: %s\n\n', labels(idx));
+
+            % --- Toolkit selection ---
+            fprintf('Which toolkits do you want to enable?\n');
+            fprintf('  [1] MATLAB (testing, debugging, code review, apps, Live Scripts)\n');
+            fprintf('  [2] Simulink (model building, testing, MBD workflows)\n');
+            fprintf('  [3] Both\n');
+            reply = input(sprintf('  Select [1]: '), 's');
+            if isempty(reply)
+                tkIdx = 1;
+            else
+                tkIdx = str2double(reply);
+            end
+            switch tkIdx
+                case 1, toolkits = "matlab";
+                case 2, toolkits = "simulink";
+                case 3, toolkits = ["matlab", "simulink"];
+                otherwise
+                    error('Terminal:InvalidSelection', 'Invalid selection.');
+            end
+            fprintf('  Selected: %s\n\n', strjoin(toolkits, ", "));
+
+            opts = struct('Agent', agent, 'Toolkits', {toolkits});
+            Terminal.setAgentOptions(opts);
+
+            fprintf('Preferences saved. Run Terminal.resetAgentOptions() to reconfigure.\n');
+            fprintf('For future use, skip the wizard with:\n');
+            fprintf('  Terminal(Agentic=true, AgentOptions=struct(''Agent'',"%s",''Toolkits'',[%s]))\n\n', ...
+                agent, strjoin("""" + toolkits + """", ","));
+        end
+
+        function toolkitPath = ensureAgenticToolkit(toolkit, forceUpdate)
+            %ENSUREAGENTICTOOLKIT Ensure an agentic toolkit is installed.
+            %   Downloads from GitHub releases if not found or if forceUpdate.
+            arguments
+                toolkit (1,1) string {mustBeMember(toolkit, ["matlab","simulink"])}
+                forceUpdate (1,1) logical = false
+            end
+
+            baseDir = fullfile(prefdir, 'Terminal', Terminal.AGENTIC_INSTALL_DIR);
+            toolkitPath = fullfile(baseDir, toolkit);
+
+            if isfolder(toolkitPath) && ~forceUpdate
+                return;
+            end
+
+            switch toolkit
+                case "matlab"
+                    repo = Terminal.AGENTIC_MATLAB_REPO;
+                    displayName = 'MATLAB Agentic Toolkit';
+                case "simulink"
+                    repo = Terminal.AGENTIC_SIMULINK_REPO;
+                    displayName = 'Simulink Agentic Toolkit';
+            end
+
+            if ~forceUpdate
+                fprintf('%s not found.\n', displayName);
+                reply = input(sprintf('Download and install it now? (y/n) [y]: '), 's');
+                if isempty(reply), reply = 'y'; end
+                if ~strcmpi(reply, 'y')
+                    error('Terminal:AgenticToolkitNotInstalled', ...
+                        '%s is required.\n\nInstall from:\n  <a href="https://github.com/%s">https://github.com/%s</a>', ...
+                        displayName, repo, repo);
+                end
+            end
+
+            % Fetch latest release.
+            apiURL = sprintf('https://api.github.com/repos/%s/releases/latest', repo);
+            try
+                webOpts = weboptions('ContentType', 'json', 'Timeout', 15);
+                release = webread(apiURL, webOpts);
+            catch me
+                error('Terminal:AgenticDownloadFailed', ...
+                    'Could not reach GitHub for %s:\n  %s', displayName, me.message);
+            end
+
+            fprintf('Downloading %s %s...\n', displayName, release.tag_name);
+
+            % Determine download URL: prefer zip asset, fall back to zipball.
+            downloadURL = '';
+            if isfield(release, 'assets') && ~isempty(release.assets)
+                for i = 1:numel(release.assets)
+                    if endsWith(release.assets(i).name, '.zip')
+                        downloadURL = release.assets(i).browser_download_url;
+                        break;
+                    end
+                end
+            end
+            if isempty(downloadURL)
+                downloadURL = release.zipball_url;
+            end
+
+            % Download to temp file.
+            tmpZip = fullfile(tempdir, sprintf('terminal-%s-toolkit.zip', toolkit));
+            try
+                websave(tmpZip, downloadURL, webOpts);
+            catch me
+                error('Terminal:AgenticDownloadFailed', ...
+                    'Download failed:\n  %s', me.message);
+            end
+
+            % Extract to a temp directory first, then move into place.
+            tmpExtract = fullfile(tempdir, sprintf('terminal-%s-extract', toolkit));
+            if isfolder(tmpExtract)
+                rmdir(tmpExtract, 's');
+            end
+            unzip(tmpZip, tmpExtract);
+            delete(tmpZip);
+
+            % GitHub zipballs extract to a single subdirectory (e.g., "matlab-matlab-agentic-toolkit-abc1234").
+            % Zip assets may extract directly. Find the content root.
+            contents = dir(tmpExtract);
+            contents = contents(~ismember({contents.name}, {'.', '..'}));
+            if numel(contents) == 1 && contents(1).isdir
+                extractedRoot = fullfile(tmpExtract, contents(1).name);
+            else
+                extractedRoot = tmpExtract;
+            end
+
+            % Move into managed location.
+            if isfolder(toolkitPath)
+                rmdir(toolkitPath, 's');
+            end
+            if ~isfolder(baseDir)
+                mkdir(baseDir);
+            end
+            movefile(extractedRoot, toolkitPath);
+
+            % Clean up temp extraction dir.
+            if isfolder(tmpExtract)
+                rmdir(tmpExtract, 's');
+            end
+
+            fprintf('%s %s installed at:\n  %s\n\n', displayName, release.tag_name, toolkitPath);
+        end
+
+        function initializeSimulinkToolkit(toolkitPath)
+            %INITIALIZESIMULINKTOOLKIT Run satk_initialize for Simulink tools.
+            initFile = fullfile(toolkitPath, 'satk_initialize.p');
+            if ~isfile(initFile)
+                warning('Terminal:SimulinkInitMissing', ...
+                    'satk_initialize not found in:\n  %s', toolkitPath);
+                return;
+            end
+            addpath(toolkitPath);
+            fprintf('Initializing Simulink Agentic Toolkit...\n');
+            try
+                satk_initialize();
+                fprintf('Simulink Agentic Toolkit initialized.\n\n');
+            catch me
+                warning('Terminal:SimulinkInitFailed', ...
+                    'satk_initialize failed:\n  %s', me.message);
+            end
+        end
+
+        function mergedFile = mergeExtensionFiles(toolkits, toolkitPaths)
+            %MERGEEXTENSIONFILES Merge Terminal editor tools with toolkit tools.
+            %   Returns path to a merged JSON file for --extension-file.
+            %   Uses cell arrays to avoid struct field mismatch when tools
+            %   have different fields (e.g., annotations present vs absent).
+
+            % Start with Terminal's editor tools.
+            editorToolsFile = fullfile( ...
+                fileparts(which('TerminalMCPTools.matlab_editor_list')), ...
+                'matlab-editor-tools.json');
+            merged = jsondecode(fileread(editorToolsFile));
+
+            % Convert tools from struct array to cell array so tools
+            % with different fields can coexist.
+            if isstruct(merged.tools) && numel(merged.tools) > 1
+                merged.tools = num2cell(merged.tools);
+            elseif isstruct(merged.tools)
+                merged.tools = {merged.tools};
+            end
+
+            % Add Simulink tools if selected.
+            toolkits = string(toolkits);
+            if ismember("simulink", toolkits) && isfield(toolkitPaths, 'simulink')
+                simToolsFile = fullfile(toolkitPaths.simulink, 'tools', 'tools.json');
+                if isfile(simToolsFile)
+                    simTools = jsondecode(fileread(simToolsFile));
+                    if isfield(simTools, 'tools')
+                        if isstruct(simTools.tools)
+                            simToolsCells = num2cell(simTools.tools);
+                        else
+                            simToolsCells = simTools.tools;
+                        end
+                        merged.tools = [merged.tools; simToolsCells];
+                    end
+                    if isfield(simTools, 'signatures')
+                        sigFields = fieldnames(simTools.signatures);
+                        for i = 1:numel(sigFields)
+                            merged.signatures.(sigFields{i}) = simTools.signatures.(sigFields{i});
+                        end
+                    end
+                else
+                    warning('Terminal:SimulinkToolsMissing', ...
+                        'Simulink tools.json not found at:\n  %s', simToolsFile);
+                end
+            end
+
+            % Write merged file to temp location.
+            mergedFile = fullfile(prefdir, 'Terminal', 'merged-extension-tools.json');
+            mergedDir = fileparts(mergedFile);
+            if ~isfolder(mergedDir)
+                mkdir(mergedDir);
+            end
+            fid = fopen(mergedFile, 'w');
+            fwrite(fid, jsonencode(merged, 'PrettyPrint', true));
+            fclose(fid);
+        end
+
+        function cmd = buildAgentRegistration(agent, serverBin, extensionFile, toolkitPaths)
+            %BUILDAGENTREGISTRATION Build the agent registration command or write config.
+            %   For CLI agents (claude, codex): returns a shell command to pre-populate.
+            %   For config-file agents: writes config directly, returns empty.
+
+            agent = string(agent);
+
+            % Common server args for all agents.
+            serverArgs = { ...
+                '--matlab-session-mode=existing', ...
+                sprintf('--extension-file=%s', extensionFile) ...
+            };
+
+            switch agent
+                case "claude"
+                    argsStr = strjoin(serverArgs, ' ');
+                    cmd = Terminal.buildClaudeSetupScript( ...
+                        serverBin, argsStr, toolkitPaths);
+
+                case "codex"
+                    argsStr = strjoin(serverArgs, ' ');
+                    cmd = sprintf('codex mcp add matlab -- "%s" %s', serverBin, argsStr);
+                    Terminal.installGlobalSkills(toolkitPaths);
+
+                case "copilot"
+                    Terminal.writeAgentConfig(agent, serverBin, serverArgs, toolkitPaths);
+                    Terminal.installGlobalSkills(toolkitPaths);
+                    cmd = '';
+
+                case "gemini"
+                    Terminal.writeAgentConfig(agent, serverBin, serverArgs, toolkitPaths);
+                    Terminal.installGlobalSkills(toolkitPaths);
+                    cmd = '';
+
+                case "cursor"
+                    Terminal.writeAgentConfig(agent, serverBin, serverArgs, toolkitPaths);
+                    cmd = '';
+
+                case "amp"
+                    Terminal.writeAgentConfig(agent, serverBin, serverArgs, toolkitPaths);
+                    cmd = '';
+            end
+
+            Terminal.printSetupSummary(agent, toolkitPaths);
+
+            if isempty(cmd)
+                fprintf('Restart %s to activate.\n\n', agent);
+            else
+                fprintf('The setup command will be pre-populated in the terminal.\n');
+                fprintf('Press Enter to run, then launch your AI agent.\n\n');
+            end
+        end
+
+        function writeAgentConfig(agent, serverBin, serverArgs, toolkitPaths)
+            %WRITEAGENTCONFIG Write MCP server config for config-file agents.
+            %   Uses targeted JSON patching (patchJsonKey) to surgically
+            %   update only the keys we manage, preserving all other user
+            %   settings and avoiding issues with dotted keys that
+            %   jsondecode cannot represent.
+
+            agent = string(agent);
+            serverBin = strrep(char(serverBin), '\', '/');
+
+            % Determine config file path and MCP servers key per agent.
+            switch agent
+                case "copilot"
+                    configFile = fullfile(Terminal.userHome(), '.vscode', 'settings.json');
+                    mcpKey = 'mcp.servers';
+                case "gemini"
+                    configFile = fullfile(Terminal.userHome(), '.gemini', 'settings.json');
+                    mcpKey = 'mcpServers';
+                case "cursor"
+                    configFile = fullfile(Terminal.userHome(), '.cursor', 'mcp.json');
+                    mcpKey = 'mcpServers';
+                case "amp"
+                    configFile = fullfile(Terminal.userHome(), '.config', 'amp', 'settings.json');
+                    mcpKey = 'amp.mcpServers';
+            end
+
+            % Read existing config or start fresh.
+            configDir = fileparts(configFile);
+            if ~isfolder(configDir)
+                mkdir(configDir);
+            end
+            if isfile(configFile)
+                rawJSON = fileread(configFile);
+            else
+                rawJSON = '{}';
+            end
+
+            % Build the MATLAB MCP server entry.
+            mcpEntry = struct( ...
+                'command', serverBin, ...
+                'args', {serverArgs} ...
+            );
+            if agent == "copilot"
+                mcpEntry.type = 'stdio';
+            end
+
+            % Patch the MCP servers key with the matlab entry.
+            mcpServersJSON = jsonencode(struct('matlab', mcpEntry), 'PrettyPrint', true);
+            rawJSON = Terminal.patchJsonKey(rawJSON, mcpKey, mcpServersJSON);
+
+            % Amp-specific: write mcpPermissions and skills path.
+            if agent == "amp"
+                rawJSON = Terminal.patchAmpPermissions(rawJSON, serverBin);
+                rawJSON = Terminal.patchAmpSkillsPath(rawJSON, toolkitPaths);
+            end
+
+            fid = fopen(configFile, 'w');
+            fwrite(fid, rawJSON);
+            fclose(fid);
+
+            fprintf('Wrote MCP server config to:\n  %s\n', configFile);
+        end
+
+        function json = patchAmpPermissions(json, mcpCommand)
+            %PATCHAMPPERMISSIONS Write amp.mcpPermissions with allow rule.
+            %   Amp injects default reject-all rules on startup, so we must
+            %   always include an allow rule for the MATLAB MCP server.
+
+            mcpCommand = strrep(mcpCommand, '\', '/');
+            mcpPermsJSON = sprintf([ ...
+                '[\n' ...
+                '    {\n' ...
+                '      "action": "allow",\n' ...
+                '      "matches": {\n' ...
+                '        "command": "%s"\n' ...
+                '      }\n' ...
+                '    },\n' ...
+                '    {\n' ...
+                '      "action": "reject",\n' ...
+                '      "matches": {\n' ...
+                '        "command": "*"\n' ...
+                '      }\n' ...
+                '    },\n' ...
+                '    {\n' ...
+                '      "action": "reject",\n' ...
+                '      "matches": {\n' ...
+                '        "url": "*"\n' ...
+                '      }\n' ...
+                '    }\n' ...
+                '  ]'], mcpCommand);
+            json = Terminal.patchJsonKey(json, 'amp.mcpPermissions', mcpPermsJSON);
+        end
+
+        function json = patchAmpSkillsPath(json, toolkitPaths)
+            %PATCHAMPSKILLSPATH Write amp.skills.path from toolkit locations.
+
+            skillsPaths = string.empty;
+            if isfield(toolkitPaths, 'matlab')
+                skillsPaths(end+1) = fullfile(toolkitPaths.matlab, 'skills-catalog');
+            end
+            if isfield(toolkitPaths, 'simulink')
+                skillsPaths(end+1) = fullfile(toolkitPaths.simulink, 'skills-catalog');
+            end
+            if ~isempty(skillsPaths)
+                sep = ':';
+                if ispc, sep = ';'; end
+                skillsPathStr = strjoin(skillsPaths, sep);
+                json = Terminal.patchJsonKey(json, 'amp.skills.path', ...
+                    jsonencode(char(skillsPathStr)));
+            end
+        end
+
+        function json = patchJsonKey(json, key, valueJSON)
+            %PATCHJSONKEY Replace or insert a top-level JSON key's value.
+            %   Finds "key": <value> in the JSON text and replaces the
+            %   value. If the key doesn't exist, inserts it before the
+            %   closing brace.
+
+            quotedKey = ['"' key '"'];
+
+            % Try to find and replace existing key.
+            % Match "key" : <value> where value can be object/array/string/etc.
+            pattern = ['"' regexptranslate('escape', key) '"\s*:\s*'];
+            loc = regexp(json, pattern, 'start', 'once');
+
+            if ~isempty(loc)
+                % Find the colon after the key.
+                colonIdx = regexp(json(loc:end), ':', 'start', 'once') + loc - 1;
+                % Find the start of the value (skip whitespace).
+                valStart = regexp(json(colonIdx+1:end), '\S', 'start', 'once') + colonIdx;
+                % Find the end of the value.
+                valEnd = Terminal.findJsonValueEnd(json, valStart);
+                % Replace the value.
+                json = [json(1:valStart-1) valueJSON json(valEnd+1:end)];
+            else
+                % Insert before the last closing brace.
+                lastBrace = find(json == '}', 1, 'last');
+                % Check if there are existing keys (need a comma).
+                beforeBrace = strtrim(json(1:lastBrace-1));
+                if endsWith(beforeBrace, '{')
+                    insertion = sprintf('  %s: %s\n', quotedKey, valueJSON);
+                else
+                    insertion = sprintf(',\n  %s: %s\n', quotedKey, valueJSON);
+                end
+                json = [json(1:lastBrace-1) insertion json(lastBrace:end)];
+            end
+        end
+
+        function endIdx = findJsonValueEnd(json, startIdx)
+            %FINDJSONVALUEEND Find the end index of a JSON value.
+            ch = json(startIdx);
+            if ch == '{' || ch == '['
+                % Find matching brace/bracket, accounting for nesting.
+                if ch == '{', openCh = '{'; closeCh = '}';
+                else,         openCh = '['; closeCh = ']';
+                end
+                depth = 1;
+                idx = startIdx + 1;
+                inStr = false;
+                while idx <= length(json) && depth > 0
+                    c = json(idx);
+                    if c == '"' && (idx == 1 || json(idx-1) ~= '\')
+                        inStr = ~inStr;
+                    elseif ~inStr
+                        if c == openCh, depth = depth + 1;
+                        elseif c == closeCh, depth = depth - 1;
+                        end
+                    end
+                    idx = idx + 1;
+                end
+                endIdx = idx - 1;
+            elseif ch == '"'
+                % String value — find closing quote.
+                idx = startIdx + 1;
+                while idx <= length(json)
+                    if json(idx) == '"' && json(idx-1) ~= '\'
+                        break;
+                    end
+                    idx = idx + 1;
+                end
+                endIdx = idx;
+            else
+                % Number, boolean, null — ends at comma, brace, or newline.
+                endMatch = regexp(json(startIdx:end), '[,}\]\s]', 'start', 'once');
+                if isempty(endMatch)
+                    endIdx = length(json);
+                else
+                    endIdx = startIdx + endMatch - 2;
+                end
+            end
+        end
+
+        function cmd = buildClaudeSetupScript(serverBin, argsStr, toolkitPaths)
+            %BUILDCLAUDESETUPSCRIPT Write a setup script for Claude Code.
+            %   Returns a command to run the script in the terminal.
+            %   The script registers the MCP server and installs plugins.
+
+            lines = {};
+            if ispc
+                lines{end+1} = '@echo off';
+            else
+                lines{end+1} = '#!/bin/bash';
+            end
+            lines{end+1} = '';
+
+            % MCP registration
+            lines{end+1} = 'echo Registering MCP server...';
+            lines{end+1} = sprintf( ...
+                'claude mcp add --transport stdio -s user matlab -- "%s" %s', ...
+                serverBin, argsStr);
+
+            % Plugin registration from each toolkit
+            toolkitNames = fieldnames(toolkitPaths);
+            for i = 1:numel(toolkitNames)
+                tkName = toolkitNames{i};
+                tkPath = toolkitPaths.(tkName);
+                mpFile = fullfile(tkPath, '.claude-plugin', 'marketplace.json');
+                if ~isfile(mpFile)
+                    continue;
+                end
+                try
+                    mp = jsondecode(fileread(mpFile));
+                catch
+                    continue;
+                end
+                if ~isfield(mp, 'name') || ~isfield(mp, 'plugins')
+                    continue;
+                end
+
+                switch tkName
+                    case 'matlab'
+                        repoURL = sprintf('https://github.com/%s', ...
+                            Terminal.AGENTIC_MATLAB_REPO);
+                    case 'simulink'
+                        repoURL = sprintf('https://github.com/%s', ...
+                            Terminal.AGENTIC_SIMULINK_REPO);
+                    otherwise
+                        continue;
+                end
+
+                lines{end+1} = ''; %#ok<*AGROW>
+                lines{end+1} = sprintf('echo Installing %s plugins...', tkName);
+                lines{end+1} = sprintf( ...
+                    'claude plugin marketplace add "%s"', repoURL);
+
+                for j = 1:numel(mp.plugins)
+                    lines{end+1} = sprintf( ...
+                        'claude plugin install %s@%s', ...
+                        mp.plugins(j).name, mp.name);
+                end
+            end
+
+            lines{end+1} = '';
+            if ispc
+                lines{end+1} = 'echo.';
+            else
+                lines{end+1} = 'echo ""';
+            end
+            lines{end+1} = 'echo Setup complete. Start a new Claude Code session to use MATLAB skills.';
+
+            % Write script to temp file
+            if ispc
+                scriptFile = fullfile(tempdir, 'terminal-claude-setup.bat');
+            else
+                scriptFile = fullfile(tempdir, 'terminal-claude-setup.sh');
+            end
+            fid = fopen(scriptFile, 'wt');  % text mode for platform line endings
+            for k = 1:numel(lines)
+                fprintf(fid, '%s\n', lines{k});
+            end
+            fclose(fid);
+
+            if ispc
+                cmd = sprintf('"%s"', scriptFile);
+            else
+                % source (not bash) so the script inherits the current
+                % shell's PATH — claude is often installed via npm/nvm
+                % which is only on PATH after .bashrc/.zshrc runs.
+                cmd = sprintf('source "%s"', scriptFile);
+            end
+        end
+
+        function installGlobalSkills(toolkitPaths)
+            %INSTALLGLOBALSKILLS Create symlinks in ~/.agents/skills/.
+            %   Links each skill directory (containing manifest.yaml) from
+            %   the toolkit so agents like Codex, Copilot, and Gemini can
+            %   discover them globally.
+
+            home = Terminal.userHome();
+            skillsDir = fullfile(home, '.agents', 'skills');
+
+            if ~isfolder(skillsDir)
+                try
+                    mkdir(skillsDir);
+                catch
+                    % Fall back to ~/.copilot/skills/ per toolkit convention
+                    skillsDir = fullfile(home, '.copilot', 'skills');
+                    mkdir(skillsDir);
+                end
+            end
+
+            toolkitNames = fieldnames(toolkitPaths);
+            linkedSkills = {};
+
+            for i = 1:numel(toolkitNames)
+                tkPath = toolkitPaths.(toolkitNames{i});
+                manifests = dir(fullfile( ...
+                    tkPath, 'skills-catalog', '*', '*', 'manifest.yaml'));
+                for j = 1:numel(manifests)
+                    skillDir = manifests(j).folder;
+                    [~, skillName] = fileparts(skillDir);
+                    linkPath = fullfile(skillsDir, skillName);
+
+                    if ispc
+                        if isfolder(linkPath)
+                            % rmdir removes the junction itself, not target
+                            system(sprintf( ...
+                                'rmdir "%s" >nul 2>&1', linkPath));
+                        end
+                        system(sprintf( ...
+                            'mklink /J "%s" "%s" >nul 2>&1', ...
+                            linkPath, skillDir));
+                    else
+                        system(sprintf( ...
+                            'ln -sfn "%s" "%s"', skillDir, linkPath));
+                    end
+
+                    linkedSkills{end+1} = skillName; %#ok<AGROW>
+                end
+            end
+
+            if ~isempty(linkedSkills)
+                fprintf('\nSkills installed (%d symlinks):\n', numel(linkedSkills));
+                fprintf('  %s\n', skillsDir);
+                for i = 1:numel(linkedSkills)
+                    fprintf('    %s\n', linkedSkills{i});
+                end
+                fprintf('\n');
+            end
+        end
+
+        function printSetupSummary(agent, toolkitPaths)
+            %PRINTSETUPSUMMARY Print what was configured and how to undo.
+
+            agent = string(agent);
+            home = Terminal.userHome();
+
+            fprintf('\nTo undo this setup:\n');
+
+            switch agent
+                case "claude"
+                    fprintf('  claude mcp remove -s user matlab\n');
+                    toolkitNames = fieldnames(toolkitPaths);
+                    for i = 1:numel(toolkitNames)
+                        tkPath = toolkitPaths.(toolkitNames{i});
+                        mpFile = fullfile(tkPath, ...
+                            '.claude-plugin', 'marketplace.json');
+                        if ~isfile(mpFile)
+                            continue;
+                        end
+                        try
+                            mp = jsondecode(fileread(mpFile));
+                        catch
+                            continue;
+                        end
+                        if ~isfield(mp, 'plugins') || ~isfield(mp, 'name')
+                            continue;
+                        end
+                        for j = 1:numel(mp.plugins)
+                            fprintf('  claude plugin uninstall %s@%s\n', ...
+                                mp.plugins(j).name, mp.name);
+                        end
+                    end
+
+                case "codex"
+                    fprintf('  codex mcp remove matlab\n');
+                    Terminal.printSkillsUndoHint(home);
+
+                case "copilot"
+                    fprintf('  Remove "matlab" from "mcp.servers" in:\n');
+                    fprintf('    %s\n', fullfile(home, '.vscode', 'settings.json'));
+                    Terminal.printSkillsUndoHint(home);
+
+                case "gemini"
+                    fprintf('  Remove "matlab" from "mcpServers" in:\n');
+                    fprintf('    %s\n', fullfile(home, '.gemini', 'settings.json'));
+                    Terminal.printSkillsUndoHint(home);
+
+                case "cursor"
+                    fprintf('  Remove "matlab" from "mcpServers" in:\n');
+                    fprintf('    %s\n', fullfile(home, '.cursor', 'mcp.json'));
+                    fprintf('  Note: Cursor does not support global skills.\n');
+                    fprintf('  MCP tools are available but toolkit skills\n');
+                    fprintf('  require opening Cursor from the toolkit directory.\n');
+
+                case "amp"
+                    fprintf('  Remove "matlab" from "amp.mcpServers" in:\n');
+                    fprintf('    %s\n', fullfile(home, '.config', 'amp', 'settings.json'));
+                    fprintf('  Remove "amp.skills.path" if no longer needed.\n');
+            end
+
+            fprintf('\n');
+        end
+
+        function printSkillsUndoHint(home)
+            %PRINTSKILLSUNDOHINT Print undo command for global skill symlinks.
+            skillsDir = fullfile(home, '.agents', 'skills');
+            if ispc
+                fprintf('  Remove skill symlinks from:\n');
+                fprintf('    %s\n', skillsDir);
+            else
+                fprintf('  rm -f %s/matlab-* %s/simulink-*\n', ...
+                    skillsDir, skillsDir);
+            end
+        end
+
+        function home = userHome()
+            %USERHOME Return the user's home directory.
+            if ispc
+                home = getenv('USERPROFILE');
+            else
+                home = getenv('HOME');
             end
         end
 
