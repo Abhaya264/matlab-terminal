@@ -1,12 +1,14 @@
 # Terminal in MATLAB®
 
+[![Open in MATLAB Online](https://www.mathworks.com/images/responsive/global/open-in-matlab-online.svg)](https://matlab.mathworks.com/open/github/v1?repo=prabhakk-mw/matlab-terminal&file=toolbox/doc/Install.m) &nbsp; [![Download Latest](https://img.shields.io/github/v/release/prabhakk-mw/matlab-terminal?label=Download%20Latest&logo=github)](../../releases/latest/download/Terminal.mltbx)
+
 Embed a full system terminal in the MATLAB® Desktop. Run shell commands, `git`, `docker`, AI coding agents, and other CLI tools without leaving MATLAB.
 
 ![Terminal in MATLAB](images/hero.gif)
 
 ## Installation
 
-Download `Terminal.mltbx` from the [latest release](../../releases/latest) and install:
+Download [`Terminal.mltbx`](../../releases/latest/download/Terminal.mltbx) and install:
 
 ```matlab
 matlab.addons.install('Terminal.mltbx')
@@ -16,8 +18,7 @@ On first launch, bundled assets are automatically extracted to a local cache. No
 
 ### Requirements
 
-- MATLAB R2020b or later
-- Linux®, macOS®, or Windows®
+- MATLAB R2024b or later
 
 ## Getting Started
 
@@ -57,8 +58,8 @@ t.Shell
 % Check the installed version
 Terminal.version()
 
-% Share MATLAB session with AI agents via MCP
-t = Terminal(MCP=true);
+% Set up AI agent integration with MathWorks toolkits
+t = Terminal(Agentic=true);
 
 % Check for updates and install the latest version from GitHub
 Terminal.update()
@@ -67,42 +68,74 @@ Terminal.update()
 Terminal.test()
 ```
 
-| Shortcut | Action |
-|----------|--------|
-| Ctrl+Shift+C | Copy selection |
-| Ctrl+Shift+V | Paste |
-| `exit` | Close current terminal tab |
+| Shortcut     | Action                     |
+| ------------ | -------------------------- |
+| Ctrl+Shift+C | Copy selection             |
+| Ctrl+Shift+V | Paste                      |
+| `exit`       | Close current terminal tab |
 
-## AI Agent Integration (MCP)
+## AI Agent Integration
 
-Terminal can share the running MATLAB session with AI coding agents via the [Model Context Protocol (MCP)](https://modelcontextprotocol.io). This allows agents like Claude to evaluate MATLAB code, run files, and interact with the MATLAB editor directly.
+Terminal can set up AI coding agents to work with MATLAB and Simulink via the [Model Context Protocol (MCP)](https://modelcontextprotocol.io). This allows agents like Claude, Codex, Copilot, Gemini, Cursor, and Amp to evaluate MATLAB code, run files, interact with the editor, and build Simulink models.
 
 ```matlab
-t = Terminal(MCP=true);
+t = Terminal(Agentic=true);
 ```
 
-This does three things:
+On first run, a setup wizard prompts you to select an agent and toolkits. Preferences are saved for subsequent runs.
 
-1. **Ensures the [MATLAB MCP Core Server Toolkit](https://github.com/matlab/matlab-mcp-core-server) is installed.** If not found, Terminal offers to download and install it from GitHub.
-2. **Ensures the `matlab-mcp-core-server` binary is available.** Terminal checks the toolbox `bin/` directory and the system PATH. If the binary is not found or is older than the minimum required version, Terminal offers to download it.
-3. **Shares the MATLAB session** by calling `shareMATLABSession()` from the toolkit, then pre-populates the MCP server registration command in the terminal. Press Enter to register, then launch your AI agent.
+### Supported Agents
+
+| Agent   | Registration                                  |
+| ------- | --------------------------------------------- |
+| Claude  | CLI command pre-populated in terminal         |
+| Codex   | CLI command pre-populated in terminal         |
+| Copilot | Config written to `.vscode/settings.json`     |
+| Gemini  | Config written to `.gemini/settings.json`     |
+| Cursor  | Config written to `.cursor/mcp.json`          |
+| Amp     | Config written to `.config/amp/settings.json` |
+
+### Toolkits
+
+- **[MATLAB Agentic Toolkit](https://github.com/matlab/matlab-agentic-toolkit)** — MCP tools + skills for MATLAB (evaluate code, run files, run tests, check code, detect errors, and more)
+- **[Simulink Agentic Toolkit](https://github.com/matlab/simulink-agentic-toolkit)** — MCP tools + skills for Simulink model building
+
+Toolkits are downloaded automatically from GitHub on first use.
 
 ### Editor Tools
 
-Terminal bundles additional MCP tools that give AI agents read-only access to the MATLAB editor. These are registered automatically via the `--extension-file` flag when using `MCP=true`:
+Terminal bundles additional MCP tools that give AI agents read-only access to the MATLAB editor:
 
-| Tool | Description |
-|------|-------------|
-| `matlab_editor_list` | List all files open in the editor with modification status |
-| `matlab_editor_active` | Get the active file, cursor position, and selected text |
-| `matlab_editor_selection` | Get the currently highlighted text |
-| `matlab_editor_read` | Read contents of an open file (reflects unsaved edits) |
+| Tool                      | Description                                                |
+| ------------------------- | ---------------------------------------------------------- |
+| `matlab_editor_list`      | List all files open in the editor with modification status |
+| `matlab_editor_active`    | Get the active file, cursor position, and selected text    |
+| `matlab_editor_selection` | Get the currently highlighted text                         |
+| `matlab_editor_read`      | Read contents of an open file (reflects unsaved edits)     |
 
-These tools are implemented in the `TerminalMCPTools` package and can also be called directly from MATLAB:
+### Skipping the Wizard
+
+Pass `AgentOptions` to skip the interactive wizard:
 
 ```matlab
-TerminalMCPTools.matlab_editor_list()
-TerminalMCPTools.matlab_editor_read("myfile")
+t = Terminal(Agentic=true, AgentOptions=struct('Agent',"claude",'Toolkits',["matlab"]));
+t = Terminal(Agentic=true, AgentOptions=struct('Agent',"gemini",'Toolkits',["matlab","simulink"]));
+```
+
+Save preferences so future calls use the same options:
+
+```matlab
+Terminal.setAgentOptions(struct('Agent',"claude",'Toolkits',["matlab"]));
+t = Terminal(Agentic=true);  % uses saved options
+```
+
+### Managing Toolkits
+
+```matlab
+Terminal.updateAgenticToolkit()            % update all installed toolkits
+Terminal.updateAgenticToolkit("matlab")    % update MATLAB toolkit only
+Terminal.updateAgenticToolkit("simulink")  % update Simulink toolkit only
+Terminal.resetAgentOptions()               % clear preferences, re-run wizard
 ```
 
 ### Requirements
@@ -112,7 +145,7 @@ TerminalMCPTools.matlab_editor_read("myfile")
 
 ### How It Works
 
-When you run `Terminal(MCP=true)`, Terminal shares the MATLAB Embedded Connector so that the MCP Core Server can connect to the running MATLAB session using `--matlab-session-mode=existing`. The `--extension-file` flag registers the bundled editor tools with the MCP server. The registration command is pre-populated in the first terminal tab — press Enter to register the MCP server with your AI agent, then start the agent from the same terminal.
+`Terminal(Agentic=true)` shares the MATLAB Embedded Connector so the MCP Core Server can connect to the running MATLAB session. It downloads the selected agentic toolkits, merges their tool definitions with the bundled editor tools, and registers the MCP server with your chosen AI agent. For CLI agents (Claude, Codex), the registration command is pre-populated in the terminal. For config-file agents (Copilot, Gemini, Cursor, Amp), the config is written directly.
 
 ## Updating
 
@@ -142,26 +175,27 @@ matlab.addons.uninstall('Terminal')
 - **Docked in MATLAB Desktop** — The terminal panel docks into the MATLAB layout like any other tool window. Undock to a floating window with `WindowStyle="normal"`.
 - **Theme integration** — Follows the MATLAB theme by default, or choose from built-in presets like Dracula, Monokai, Nord, and more. Change themes on the fly with `t.Theme = "dracula"`. See [Themes](#themes) for the full list and customization options.
 
-  | Light | Dark |
-  |-------|------|
+  | Light                                  | Dark                                 |
+  | -------------------------------------- | ------------------------------------ |
   | ![Light theme](images/theme-light.png) | ![Dark theme](images/theme-dark.png) |
+
 - **Copy and paste** — Ctrl+Shift+C to copy, Ctrl+Shift+V to paste.
 - **Instance management** — `Terminal.list()` returns handles to all running terminals. `Terminal.closeAll()` closes them all.
 - **Self-updating** — `Terminal.update()` checks GitHub for new releases and walks through the upgrade interactively.
 - **Auto-cleanup** — Closing the last tab closes the window. The server process is terminated when the terminal is deleted or MATLAB exits. An idle timeout acts as a safety net.
 - **Environment variables** — Terminal sessions have `MATLAB_PID` and `MATLAB_ROOT` set, allowing CLI tools to discover the running MATLAB instance.
-- **MCP integration** — `Terminal(MCP=true)` shares the running MATLAB session so AI coding agents (like Claude) can connect to it via the [MATLAB MCP Core Server](https://github.com/matlab/matlab-mcp-core-server). See [AI Agent Integration (MCP)](#ai-agent-integration-mcp) for details.
+- **AI agent integration** — `Terminal(Agentic=true)` sets up AI coding agents (Claude, Codex, Copilot, Gemini, Cursor, Amp) to work with MATLAB and Simulink via MCP. See [AI Agent Integration](#ai-agent-integration) for details.
 - **Event API (R2023a+)** — On R2023a and later, uses `sendEventToHTMLSource`/`HTMLEventReceivedFcn` for reliable keystroke delivery with no data loss. Older releases fall back to the Data channel with buffering.
 - **matlab-proxy compatible** — Works in browser-based MATLAB via [matlab-proxy](https://github.com/mathworks/matlab-proxy).
 - **Zero runtime dependencies** — No Node.js®, Python®, or Java® required. A single Go binary handles all PTY management.
 
 ### Release-Dependent Behavior
 
-| Behavior | Details |
-|----------|---------|
-| Docked window style | Supported on releases where `uifigure` accepts `WindowStyle='docked'`. On releases that do not support it (e.g., R2024a), the terminal falls back to a normal floating window with a warning. |
-| Reliable keystroke delivery | R2023a and later use the event-based API with no data loss. Older releases use the Data channel with buffering; fast typing may lose characters. |
-| Live theme switching | Detects MATLAB theme changes by polling `DefaultFigureColor`. On releases where this property does not update, restart the terminal to pick up theme changes. |
+| Behavior                    | Details                                                                                                                                                                                       |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Docked window style         | Supported on releases where `uifigure` accepts `WindowStyle='docked'`. On releases that do not support it (e.g., R2024a), the terminal falls back to a normal floating window with a warning. |
+| Reliable keystroke delivery | R2023a and later use the event-based API with no data loss. Older releases use the Data channel with buffering; fast typing may lose characters.                                              |
+| Live theme switching        | Detects MATLAB theme changes by polling `DefaultFigureColor`. On releases where this property does not update, restart the terminal to pick up theme changes.                                 |
 
 ## Known Limitations
 
@@ -190,20 +224,20 @@ t.Theme = "nord";
 
 ### Available Presets
 
-| Preset | Description |
-|--------|-------------|
-| `"auto"` | Follows the MATLAB Desktop theme (default) |
-| `"light"` | Light theme (white background) |
-| `"dark"` | Dark theme (VS Code–style) |
-| `"dracula"` | Dracula |
-| `"monokai"` | Monokai |
-| `"solarized-dark"` | Solarized Dark |
-| `"solarized-light"` | Solarized Light |
-| `"nord"` | Nord |
-| `"gruvbox-dark"` | Gruvbox Dark |
-| `"one-dark"` | Atom One Dark |
-| `"tokyo-night"` | Tokyo Night |
-| `"catppuccin-mocha"` | Catppuccin Mocha |
+| Preset               | Description                                |
+| -------------------- | ------------------------------------------ |
+| `"auto"`             | Follows the MATLAB Desktop theme (default) |
+| `"light"`            | Light theme (white background)             |
+| `"dark"`             | Dark theme (VS Code–style)                 |
+| `"dracula"`          | Dracula                                    |
+| `"monokai"`          | Monokai                                    |
+| `"solarized-dark"`   | Solarized Dark                             |
+| `"solarized-light"`  | Solarized Light                            |
+| `"nord"`             | Nord                                       |
+| `"gruvbox-dark"`     | Gruvbox Dark                               |
+| `"one-dark"`         | Atom One Dark                              |
+| `"tokyo-night"`      | Tokyo Night                                |
+| `"catppuccin-mocha"` | Catppuccin Mocha                           |
 
 List all available presets programmatically:
 
@@ -265,29 +299,29 @@ t = Terminal(Theme=myTheme);
 
 All fields are optional. Values must be `'#rrggbb'` hex color strings.
 
-| Field | Description | Default (from `"dark"` preset) |
-|-------|-------------|-------------------------------|
-| `background` | Terminal background | `'#1e1e1e'` |
-| `foreground` | Default text color | `'#d4d4d4'` |
-| `cursor` | Cursor color | `'#aeafad'` |
-| `cursorAccent` | Cursor text color (character under cursor) | Same as `background` |
-| `selectionBackground` | Selected text highlight | `'#264f78'` |
-| `black` | ANSI black (color 0) | xterm.js default |
-| `red` | ANSI red (color 1) | xterm.js default |
-| `green` | ANSI green (color 2) | xterm.js default |
-| `yellow` | ANSI yellow (color 3) | xterm.js default |
-| `blue` | ANSI blue (color 4) | xterm.js default |
-| `magenta` | ANSI magenta (color 5) | xterm.js default |
-| `cyan` | ANSI cyan (color 6) | xterm.js default |
-| `white` | ANSI white (color 7) | xterm.js default |
-| `brightBlack` | ANSI bright black (color 8) | xterm.js default |
-| `brightRed` | ANSI bright red (color 9) | xterm.js default |
-| `brightGreen` | ANSI bright green (color 10) | xterm.js default |
-| `brightYellow` | ANSI bright yellow (color 11) | xterm.js default |
-| `brightBlue` | ANSI bright blue (color 12) | xterm.js default |
-| `brightMagenta` | ANSI bright magenta (color 13) | xterm.js default |
-| `brightCyan` | ANSI bright cyan (color 14) | xterm.js default |
-| `brightWhite` | ANSI bright white (color 15) | xterm.js default |
+| Field                 | Description                                | Default (from `"dark"` preset) |
+| --------------------- | ------------------------------------------ | ------------------------------ |
+| `background`          | Terminal background                        | `'#1e1e1e'`                    |
+| `foreground`          | Default text color                         | `'#d4d4d4'`                    |
+| `cursor`              | Cursor color                               | `'#aeafad'`                    |
+| `cursorAccent`        | Cursor text color (character under cursor) | Same as `background`           |
+| `selectionBackground` | Selected text highlight                    | `'#264f78'`                    |
+| `black`               | ANSI black (color 0)                       | xterm.js default               |
+| `red`                 | ANSI red (color 1)                         | xterm.js default               |
+| `green`               | ANSI green (color 2)                       | xterm.js default               |
+| `yellow`              | ANSI yellow (color 3)                      | xterm.js default               |
+| `blue`                | ANSI blue (color 4)                        | xterm.js default               |
+| `magenta`             | ANSI magenta (color 5)                     | xterm.js default               |
+| `cyan`                | ANSI cyan (color 6)                        | xterm.js default               |
+| `white`               | ANSI white (color 7)                       | xterm.js default               |
+| `brightBlack`         | ANSI bright black (color 8)                | xterm.js default               |
+| `brightRed`           | ANSI bright red (color 9)                  | xterm.js default               |
+| `brightGreen`         | ANSI bright green (color 10)               | xterm.js default               |
+| `brightYellow`        | ANSI bright yellow (color 11)              | xterm.js default               |
+| `brightBlue`          | ANSI bright blue (color 12)                | xterm.js default               |
+| `brightMagenta`       | ANSI bright magenta (color 13)             | xterm.js default               |
+| `brightCyan`          | ANSI bright cyan (color 14)                | xterm.js default               |
+| `brightWhite`         | ANSI bright white (color 15)               | xterm.js default               |
 
 #### Validation
 
@@ -406,19 +440,22 @@ See [DESIGN.md](DESIGN.md) for detailed architecture decisions and security anal
 ### Development Setup
 
 1. **Build the Go server** (requires Go 1.21+):
+
    ```bash
    cd server/
    ```
+
    Build into `dist/<arch>/` where `<arch>` matches the platform:
 
-   | Platform | `<arch>` | Build command |
-   |----------|----------|---------------|
-   | Linux x86_64 | `glnxa64` | `mkdir -p ../dist/glnxa64 && go build -o ../dist/glnxa64/matlab-terminal-server .` |
-   | macOS Intel | `maci64` | `mkdir -p ../dist/maci64 && GOARCH=amd64 go build -o ../dist/maci64/matlab-terminal-server .` |
-   | macOS Apple Silicon | `maca64` | `mkdir -p ../dist/maca64 && GOARCH=arm64 go build -o ../dist/maca64/matlab-terminal-server .` |
-   | Windows x86_64 | `win64` | `mkdir -p ../dist/win64 && GOOS=windows GOARCH=amd64 go build -o ../dist/win64/matlab-terminal-server.exe .` |
+   | Platform            | `<arch>`  | Build command                                                                                                |
+   | ------------------- | --------- | ------------------------------------------------------------------------------------------------------------ |
+   | Linux x86_64        | `glnxa64` | `mkdir -p ../dist/glnxa64 && go build -o ../dist/glnxa64/matlab-terminal-server .`                           |
+   | macOS Intel         | `maci64`  | `mkdir -p ../dist/maci64 && GOARCH=amd64 go build -o ../dist/maci64/matlab-terminal-server .`                |
+   | macOS Apple Silicon | `maca64`  | `mkdir -p ../dist/maca64 && GOARCH=arm64 go build -o ../dist/maca64/matlab-terminal-server .`                |
+   | Windows x86_64      | `win64`   | `mkdir -p ../dist/win64 && GOOS=windows GOARCH=amd64 go build -o ../dist/win64/matlab-terminal-server.exe .` |
 
 2. **Add the toolbox to the MATLAB path**:
+
    ```matlab
    addpath('/path/to/matlab-terminal/toolbox')
    ```
@@ -467,10 +504,10 @@ disp(table(results))
 
 #### Test Tiers
 
-| Test class | What it covers | Requirements |
-|---|---|---|
-| `TestTerminalUnit` | Static APIs (`version`, `generateToken`, `themes`, `setDefaultTheme`/`getDefaultTheme`, `list`, `closeAll`), theme validation, theme resolution, token cryptographic strength | MATLAB only — no display, no server binary |
-| `TestTerminalIntegration` | Constructor with all Name-Value pairs (`Name`, `WindowStyle`, `Shell`, `Theme`), parent embedding (`uifigure`, `uipanel`), lifecycle (`delete`, `list`, `closeAll`), live theme switching, default theme inheritance | Display (uifigure) + server binary |
+| Test class                | What it covers                                                                                                                                                                                                       | Requirements                               |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| `TestTerminalUnit`        | Static APIs (`version`, `generateToken`, `themes`, `setDefaultTheme`/`getDefaultTheme`, `list`, `closeAll`), theme validation, theme resolution, token cryptographic strength                                        | MATLAB only — no display, no server binary |
+| `TestTerminalIntegration` | Constructor with all Name-Value pairs (`Name`, `WindowStyle`, `Shell`, `Theme`), parent embedding (`uifigure`, `uipanel`), lifecycle (`delete`, `list`, `closeAll`), live theme switching, default theme inheritance | Display (uifigure) + server binary         |
 
 Integration tests skip automatically with a diagnostic message when prerequisites are not met (e.g., headless environment or missing binary). Unit tests always run.
 
@@ -484,11 +521,13 @@ For developers working from a git clone:
    addpath('toolbox')
    ```
 3. Run the test suite:
+
    ```matlab
    Terminal.test()
    ```
 
    Or run individual test classes:
+
    ```matlab
    runtests('toolbox/tests/TestTerminalUnit.m')
    runtests('toolbox/tests/TestTerminalIntegration.m')
@@ -503,11 +542,11 @@ cd server/
 go test -v -count=1 ./...
 ```
 
-| Test file | What it covers |
-|---|---|
-| `auth_test.go` | Token validation (exact match, wrong token, empty, case sensitivity, substrings) |
-| `api_test.go` | All HTTP handlers — auth rejection on every endpoint, wrong HTTP method, invalid JSON, oversized request body, poll message filtering, session listing, scrollback, last-activity tracking |
-| `integration_test.go` | Full session lifecycle over HTTP — create, input, poll, resize, scrollback, close, shell exit detection, multi-session isolation |
+| Test file             | What it covers                                                                                                                                                                             |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `auth_test.go`        | Token validation (exact match, wrong token, empty, case sensitivity, substrings)                                                                                                           |
+| `api_test.go`         | All HTTP handlers — auth rejection on every endpoint, wrong HTTP method, invalid JSON, oversized request body, poll message filtering, session listing, scrollback, last-activity tracking |
+| `integration_test.go` | Full session lifecycle over HTTP — create, input, poll, resize, scrollback, close, shell exit detection, multi-session isolation                                                           |
 
 ### Building a Release
 
