@@ -1851,14 +1851,18 @@ classdef Terminal < handle
                 sprintf('--extension-file=%s', extensionFile) ...
             };
 
+            % Shell-safe args: quote each arg individually for CLI agents.
+            quotedArgs = cellfun(@(a) sprintf('"%s"', a), serverArgs, ...
+                'UniformOutput', false);
+
             switch agent
                 case "claude"
-                    argsStr = strjoin(serverArgs, ' ');
+                    argsStr = strjoin(quotedArgs, ' ');
                     cmd = Terminal.buildClaudeSetupScript( ...
                         serverBin, argsStr, toolkitPaths);
 
                 case "codex"
-                    argsStr = strjoin(serverArgs, ' ');
+                    argsStr = strjoin(quotedArgs, ' ');
                     cmd = sprintf('codex mcp add matlab -- "%s" %s', serverBin, argsStr);
                     Terminal.installGlobalSkills(toolkitPaths);
 
@@ -1886,8 +1890,8 @@ classdef Terminal < handle
             if isempty(cmd)
                 fprintf('Restart %s to activate.\n\n', agent);
             else
-                fprintf('The setup command will be pre-populated in the terminal.\n');
-                fprintf('Press Enter to run, then launch your AI agent.\n\n');
+                fprintf('The setup script is open in the editor for review.\n');
+                fprintf('Press Enter in the terminal to run it.\n\n');
             end
         end
 
@@ -2096,8 +2100,13 @@ classdef Terminal < handle
             end
             lines{end+1} = '';
 
-            % MCP registration
+            % MCP registration (remove stale entry first)
             lines{end+1} = 'echo Registering MCP server...';
+            if ispc
+                lines{end+1} = 'claude mcp remove -s user matlab 2>nul';
+            else
+                lines{end+1} = 'claude mcp remove -s user matlab 2>/dev/null';
+            end
             lines{end+1} = sprintf( ...
                 'claude mcp add --transport stdio -s user matlab -- "%s" %s', ...
                 serverBin, argsStr);
@@ -2151,17 +2160,24 @@ classdef Terminal < handle
             end
             lines{end+1} = 'echo Setup complete. Start a new Claude Code session to use MATLAB skills.';
 
-            % Write script to temp file
+            % Write script to toolbox scripts directory.
+            scriptsDir = fullfile(Terminal.toolboxDir(), 'scripts');
+            if ~isfolder(scriptsDir)
+                mkdir(scriptsDir);
+            end
             if ispc
-                scriptFile = fullfile(tempdir, 'terminal-claude-setup.bat');
+                scriptFile = fullfile(scriptsDir, 'setup-claude.bat');
             else
-                scriptFile = fullfile(tempdir, 'terminal-claude-setup.sh');
+                scriptFile = fullfile(scriptsDir, 'setup-claude.sh');
             end
             fid = fopen(scriptFile, 'wt');  % text mode for platform line endings
             for k = 1:numel(lines)
                 fprintf(fid, '%s\n', lines{k});
             end
             fclose(fid);
+
+            % Open the script in the MATLAB editor for review.
+            edit(scriptFile);
 
             if ispc
                 cmd = sprintf('"%s"', scriptFile);
