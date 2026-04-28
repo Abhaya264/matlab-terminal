@@ -4,7 +4,7 @@
 
 Embed a full system terminal in the MATLAB® Desktop. Run shell commands, `git`, `docker`, AI coding agents, and other CLI tools without leaving MATLAB.
 
-![Terminal in MATLAB](images/hero.gif)
+<video src="images/hero.mp4" autoplay loop muted playsinline></video>
 
 ## Installation
 
