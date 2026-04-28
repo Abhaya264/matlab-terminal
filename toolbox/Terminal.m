@@ -131,7 +131,7 @@ classdef Terminal < handle
         % but cannot guarantee compatibility with future server versions.
         MCP_MIN_SERVER_VERSION = '0.8.0'
         % Agentic Toolkit constants
-        AGENTIC_INSTALL_DIR = 'agentic-toolkit'  % under prefdir/Terminal/
+        AGENTIC_INSTALL_DIR = 'agentic-toolkit'  % under toolboxDir/bin/
         AGENTIC_MATLAB_REPO = 'matlab/matlab-agentic-toolkit'
         AGENTIC_SIMULINK_REPO = 'matlab/simulink-agentic-toolkit'
         AGENTIC_SUPPORTED_AGENTS = ["claude","amp","gemini","cursor","codex","copilot"]
@@ -353,13 +353,8 @@ classdef Terminal < handle
 
             % --- Locate web assets ---
             % extractWebAssets (called above) ensures these exist.
-            htmlDir = fullfile(fileparts(mfilename('fullpath')), 'html');
+            htmlDir = fullfile(Terminal.toolboxDir(), 'html');
             htmlFile = fullfile(htmlDir, 'index.html');
-            if ~isfile(htmlFile)
-                % Installed via .mltbx — use extracted cache.
-                htmlDir = fullfile(prefdir, 'matlab-terminal', 'html');
-                htmlFile = fullfile(htmlDir, 'index.html');
-            end
             if ~isfile(htmlFile)
                 error('Terminal:HTMLNotFound', ...
                     'Could not find index.html at:\n  %s', htmlFile);
@@ -873,7 +868,7 @@ classdef Terminal < handle
             end
             if toolkit == ""
                 % Update all installed toolkits.
-                baseDir = fullfile(prefdir, 'Terminal', Terminal.AGENTIC_INSTALL_DIR);
+                baseDir = fullfile(Terminal.toolboxDir(), 'bin', Terminal.AGENTIC_INSTALL_DIR);
                 if isfolder(fullfile(baseDir, 'matlab'))
                     Terminal.ensureAgenticToolkit("matlab", true);
                 end
@@ -989,21 +984,36 @@ classdef Terminal < handle
             disp('Step 2/5: Closing all open terminals...');
             Terminal.closeAll();
 
-            % Step 3: Uninstall current toolbox.
-            disp('Step 3/5: Uninstalling current version...');
+            % Step 3: Remove runtime artifacts before uninstall.
+            % Remove files we created at runtime so the uninstaller only
+            % deals with the original .mltbx contents and doesn't fail on
+            % busy files (e.g., running binaries, NFS lock files).
+            disp('Step 3/5: Clearing any cached assets...');
+            cleanupDirs = {
+                fullfile(Terminal.toolboxDir(), 'bin')
+                fullfile(Terminal.toolboxDir(), 'html')
+            };
+            cleanupFiles = {
+                fullfile(Terminal.toolboxDir(), '.extracted')
+                fullfile(Terminal.toolboxDir(), 'merged-extension-tools.json')
+            };
+            for i = 1:numel(cleanupDirs)
+                if isfolder(cleanupDirs{i})
+                    try rmdir(cleanupDirs{i}, 's'); catch, end
+                end
+            end
+            for i = 1:numel(cleanupFiles)
+                if isfile(cleanupFiles{i})
+                    try delete(cleanupFiles{i}); catch, end
+                end
+            end
+
+            % Step 4: Uninstall current toolbox.
+            disp('Step 4/5: Uninstalling current version...');
             try
                 matlab.addons.uninstall(Terminal.TOOLBOX_ID);
             catch
                 % May fail if running from source or not installed as toolbox.
-            end
-
-            % Step 4: Clear cached assets.
-            cacheRoot = fullfile(prefdir, 'matlab-terminal');
-            if isfolder(cacheRoot)
-                disp('Step 4/5: Clearing cached assets...');
-                rmdir(cacheRoot, 's');
-            else
-                disp('Step 4/5: No cached assets to clear.');
             end
 
             % Step 5: Install the new version.
@@ -1236,7 +1246,7 @@ classdef Terminal < handle
             %
             %   results = Terminal.test()   — also returns the TestResult array
 
-            testsDir = fullfile(fileparts(mfilename('fullpath')), 'tests');
+            testsDir = fullfile(Terminal.toolboxDir(), 'tests');
 
             fprintf('\n<strong>Terminal Test Suite v%s</strong>\n\n', Terminal.version());
 
@@ -1291,6 +1301,29 @@ classdef Terminal < handle
     end
 
     methods (Static, Access = private)
+        function cleanupLegacyPrefdir()
+            %CLEANUPLEGACYPREFDIR Remove pre-v0.13 artifact directories from prefdir.
+            %   Pre-v0.13 stored runtime artifacts under three separate prefdir
+            %   roots. Remove this function once pre-v0.13 installs are rare.
+            dirs = {
+                fullfile(prefdir, 'matlab-terminal')
+                fullfile(prefdir, 'matlab-mcp')
+                fullfile(prefdir, 'Terminal')
+            };
+            for i = 1:numel(dirs)
+                if isfolder(dirs{i})
+                    try rmdir(dirs{i}, 's'); catch, end
+                end
+            end
+        end
+
+        function p = toolboxDir()
+            %TOOLBOXDIR Return the directory containing Terminal.m.
+            %   All runtime artifacts (extracted assets, downloaded binaries,
+            %   agentic toolkits) are stored relative to this directory.
+            p = fileparts(mfilename('fullpath'));
+        end
+
         function serverBin = setupMCP()
             %SETUPMCP Share the MATLAB session for AI agent access.
             %   Ensures the MCP Core Server Toolkit and server binary are
@@ -1379,7 +1412,7 @@ classdef Terminal < handle
             end
 
             % Check our managed install location first.
-            installDir = fullfile(prefdir, 'matlab-mcp');
+            installDir = fullfile(Terminal.toolboxDir(), 'bin');
             serverBin = fullfile(installDir, binaryName);
             if isfile(serverBin)
                 if Terminal.checkMCPServerVersion(serverBin)
@@ -1636,7 +1669,7 @@ classdef Terminal < handle
                 forceUpdate (1,1) logical = false
             end
 
-            baseDir = fullfile(prefdir, 'Terminal', Terminal.AGENTIC_INSTALL_DIR);
+            baseDir = fullfile(Terminal.toolboxDir(), 'bin', Terminal.AGENTIC_INSTALL_DIR);
             toolkitPath = fullfile(baseDir, toolkit);
 
             if isfolder(toolkitPath) && ~forceUpdate
@@ -1798,12 +1831,8 @@ classdef Terminal < handle
                 end
             end
 
-            % Write merged file to temp location.
-            mergedFile = fullfile(prefdir, 'Terminal', 'merged-extension-tools.json');
-            mergedDir = fileparts(mergedFile);
-            if ~isfolder(mergedDir)
-                mkdir(mergedDir);
-            end
+            % Write merged file alongside Terminal.m.
+            mergedFile = fullfile(Terminal.toolboxDir(), 'merged-extension-tools.json');
             fid = fopen(mergedFile, 'w');
             fwrite(fid, jsonencode(merged, 'PrettyPrint', true));
             fclose(fid);
@@ -2311,11 +2340,11 @@ classdef Terminal < handle
             %EXTRACTWEBASSETS Extract web assets from web_assets.mat to a cache dir.
             %   packageToolbox drops .html/.css/.js files, so we bundle them
             %   in a .mat file and extract at runtime.
-            cacheRoot = fullfile(prefdir, 'matlab-terminal');
+            cacheRoot = Terminal.toolboxDir();
             cacheDir = fullfile(cacheRoot, 'html');
             stampFile = fullfile(cacheRoot, '.extracted');
 
-            matFile = fullfile(fileparts(mfilename('fullpath')), 'web_assets.mat');
+            matFile = fullfile(cacheRoot, 'web_assets.mat');
             if ~isfile(matFile)
                 % Running from source — no .mat file needed.
                 htmlDir = cacheDir;
@@ -2336,18 +2365,26 @@ classdef Terminal < handle
                 return;
             end
 
-            % Wipe old cache entirely before extracting.
-            if isfolder(cacheRoot)
-                fprintf('Clearing old Terminal cache at:\n  %s\n', cacheRoot);
-                rmdir(cacheRoot, 's');
-            end
+            % Clear previously extracted assets before re-extracting.
+            % Only remove html/ and the server binary directory to
+            % preserve downloaded artifacts (MCP server, agentic toolkits).
+            serverBinDir = fullfile(cacheRoot, 'bin', 'matlab-terminal-server');
+            if isfolder(cacheDir), rmdir(cacheDir, 's'); end
+            if isfolder(serverBinDir), rmdir(serverBinDir, 's'); end
+
+            Terminal.cleanupLegacyPrefdir();
 
             fprintf('Extracting Terminal assets to:\n  %s\n', cacheRoot);
 
             S = load(matFile, 'assets');
+            arch = computer('arch');
             fields = fieldnames(S.assets);
             for i = 1:numel(fields)
                 entry = S.assets.(fields{i});
+                % Skip binaries for other platforms.
+                if entry.executable && ~contains(entry.path, arch)
+                    continue;
+                end
                 dst = fullfile(cacheRoot, entry.path);
                 dstDir = fileparts(dst);
                 if ~isfolder(dstDir)
@@ -2356,19 +2393,16 @@ classdef Terminal < handle
                 fid = fopen(dst, 'w');
                 fwrite(fid, entry.data);
                 fclose(fid);
-                % Make binaries executable.
-                if isfield(entry, 'executable') && entry.executable && ~ispc
+                if entry.executable && ~ispc
                     system(sprintf('chmod +x "%s"', dst));
                 end
             end
 
-            % Strip macOS quarantine attribute from all extracted files.
+            % Strip macOS quarantine from the extracted server binary.
             % Downloaded .mltbx files inherit com.apple.quarantine, which
-            % causes Gatekeeper to block the unsigned server binary.
-            % Use -cr (clear, recursive) to silently handle files that
-            % don't have the attribute.
+            % causes Gatekeeper to block the unsigned binary.
             if ismac
-                [~, ~] = system(sprintf('xattr -cr "%s"', cacheRoot));
+                [~, ~] = system(sprintf('xattr -cr "%s"', serverBinDir));
             end
 
             % Touch stamp file so we know this extraction is current.
@@ -2395,21 +2429,14 @@ classdef Terminal < handle
 
             % Check dist/<arch>/ directory (development builds).
             arch = computer('arch');
-            candidate = fullfile(fileparts(fileparts(mfilename('fullpath'))), 'dist', arch, binaryName);
+            candidate = fullfile(fileparts(Terminal.toolboxDir()), 'dist', arch, binaryName);
             if isfile(candidate)
                 binaryPath = candidate;
                 return;
             end
 
-            % Check extracted cache (from web_assets.mat).
-            candidate = fullfile(prefdir, 'matlab-terminal', 'bin', arch, binaryName);
-            if isfile(candidate)
-                binaryPath = candidate;
-                return;
-            end
-
-            % Check userpath/bin (installed via Terminal.install).
-            candidate = fullfile(userpath, 'bin', binaryName);
+            % Check toolbox bin/ directory (extracted from web_assets.mat).
+            candidate = fullfile(Terminal.toolboxDir(), 'bin', 'matlab-terminal-server', arch, binaryName);
             if isfile(candidate)
                 binaryPath = candidate;
                 return;
@@ -2496,7 +2523,7 @@ classdef Terminal < handle
             end
 
             % Check managed install location first.
-            installDir = fullfile(prefdir, 'matlab-terminal', 'bin');
+            installDir = fullfile(Terminal.toolboxDir(), 'bin');
             candidate = fullfile(installDir, binaryName);
             if isfile(candidate)
                 verifierBin = candidate;

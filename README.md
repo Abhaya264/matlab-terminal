@@ -84,7 +84,7 @@ t = Terminal(MCP=true);
 This does three things:
 
 1. **Ensures the [MATLAB MCP Core Server Toolkit](https://github.com/matlab/matlab-mcp-core-server) is installed.** If not found, Terminal offers to download and install it from GitHub.
-2. **Ensures the `matlab-mcp-core-server` binary is available.** Terminal checks a managed install location (`prefdir/matlab-mcp/`) and the system PATH. If the binary is not found or is older than the minimum required version, Terminal offers to download it.
+2. **Ensures the `matlab-mcp-core-server` binary is available.** Terminal checks the toolbox `bin/` directory and the system PATH. If the binary is not found or is older than the minimum required version, Terminal offers to download it.
 3. **Shares the MATLAB session** by calling `shareMATLABSession()` from the toolkit, then pre-populates the MCP server registration command in the terminal. Press Enter to register, then launch your AI agent.
 
 ### Editor Tools
@@ -536,7 +536,7 @@ Output: `dist/Terminal.mltbx`
 2. **Bundles assets** — `build_assets.m` reads `html/` files and all server binaries from `dist/<arch>/`, packing them as byte arrays into `toolbox/web_assets.mat`. This works around `packageToolbox` silently dropping `.html`, `.css`, `.js`, and binary files.
 3. **Packages toolbox** — `packageToolbox` creates the `.mltbx` from `toolbox/`, which includes the `.mat` alongside `.m` files, the Getting Started guide, and the toolbox icon.
 
-At runtime, `Terminal.m` extracts assets from `web_assets.mat` to `prefdir/matlab-terminal/` on first launch (version-stamped to avoid re-extraction).
+At runtime, `Terminal.m` extracts assets from `web_assets.mat` into the toolbox directory (`html/` and `bin/matlab-terminal-server/<arch>/`) on first launch (version-stamped to avoid re-extraction). Only the binary for the current platform is extracted.
 
 ### CI/CD Pipeline (GitHub Actions)
 

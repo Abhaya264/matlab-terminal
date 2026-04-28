@@ -118,7 +118,7 @@ Detection: MATLAB uses `isMATLABReleaseOlderThan('R2023a')`, JS uses `typeof com
 - The Go binary also self-terminates after an idle timeout as a safety net
 
 ### Decision 5: Asset bundling via .mat file
-**Choice**: Web assets (HTML, CSS, JS) and the server binary are bundled in a `web_assets.mat` file within the .mltbx toolbox. They are extracted to `prefdir/matlab-terminal/` on first run.
+**Choice**: Web assets (HTML, CSS, JS) and the server binary are bundled in a `web_assets.mat` file within the .mltbx toolbox. They are extracted into the toolbox directory itself (`html/` and `bin/matlab-terminal-server/<arch>/`) on first run. Only the binary for the current platform is extracted.
 
 **Rationale**:
 - `packageToolbox` silently drops `.html`, `.css`, `.js`, and binary executable files

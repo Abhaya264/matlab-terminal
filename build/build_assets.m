@@ -32,7 +32,7 @@ for p = 1:numel(platforms)
     end
     bp = fullfile(projectDir, 'dist', plat, bn);
     if isfile(bp)
-        files{end+1} = ['bin/', plat, '/', bn]; %#ok<SAGROW>
+        files{end+1} = ['bin/matlab-terminal-server/', plat, '/', bn]; %#ok<SAGROW>
         binaryPaths.(plat) = bp;
         foundAny = true;
     end
@@ -48,7 +48,7 @@ for i = 1:numel(files)
     % Resolve source path: bin/ files come from dist/<arch>/, others from toolbox/.
     if startsWith(rel, 'bin/')
         parts = strsplit(rel, '/');
-        plat = parts{2};
+        plat = parts{3};
         src = binaryPaths.(plat);
     else
         src = fullfile(toolboxDir, rel);
