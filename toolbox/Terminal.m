@@ -512,7 +512,7 @@ classdef Terminal < handle
                 end
 
                 % --- Periodic theme change detection (only in auto mode) ---
-                if obj.Theme == "auto"
+                if ~isstruct(obj.Theme) && string(obj.Theme) == "auto"
                     obj.ThemePollCount = obj.ThemePollCount + 1;
                     if obj.ThemePollCount >= obj.THEME_CHECK_TICKS
                         obj.ThemePollCount = 0;
