@@ -278,6 +278,87 @@ func TestPoll_SinceFilters(t *testing.T) {
 	}
 }
 
+func TestPoll_SinceInvalidValue(t *testing.T) {
+	h := newTestHandler()
+
+	h.enqueue(outputMessage{Type: "output", ID: "s1", Data: "aGVsbG8="})
+	h.enqueue(outputMessage{Type: "output", ID: "s1", Data: "d29ybGQ="})
+
+	// "abc" is not valid JSON — json.Unmarshal fails silently, since stays 0.
+	// Expect 200 with all messages returned (same as since=0).
+	req := httptest.NewRequest("GET", "/api/poll?since=abc", nil)
+	req.Header = authHeader(testToken)
+	w := httptest.NewRecorder()
+	h.HandlePoll(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200", w.Code)
+	}
+
+	var resp struct {
+		Messages []outputMessage `json:"messages"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+
+	if len(resp.Messages) != 2 {
+		t.Errorf("got %d messages, want 2 (invalid since should fall back to 0)", len(resp.Messages))
+	}
+}
+
+func TestPoll_SinceNegative(t *testing.T) {
+	h := newTestHandler()
+
+	h.enqueue(outputMessage{Type: "output", ID: "s1", Data: "aGVsbG8="})
+	h.enqueue(outputMessage{Type: "output", ID: "s1", Data: "d29ybGQ="})
+
+	// Negative since: all messages have seq > -5, so all should be returned.
+	req := httptest.NewRequest("GET", "/api/poll?since=-5", nil)
+	req.Header = authHeader(testToken)
+	w := httptest.NewRecorder()
+	h.HandlePoll(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200", w.Code)
+	}
+
+	var resp struct {
+		Messages []outputMessage `json:"messages"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+
+	if len(resp.Messages) != 2 {
+		t.Errorf("got %d messages, want 2", len(resp.Messages))
+	}
+}
+
+func TestPoll_SinceEqualToLast(t *testing.T) {
+	h := newTestHandler()
+
+	h.enqueue(outputMessage{Type: "output", ID: "s1", Data: "Zmlyc3Q="})
+	h.enqueue(outputMessage{Type: "output", ID: "s1", Data: "c2Vjb25k"})
+	h.enqueue(outputMessage{Type: "output", ID: "s1", Data: "dGhpcmQ="})
+
+	// since=3 means "I have seen up to seq 3" — filter is strict (seq > since),
+	// so the response must be empty. An off-by-one would re-deliver seq=3.
+	req := httptest.NewRequest("GET", "/api/poll?since=3", nil)
+	req.Header = authHeader(testToken)
+	w := httptest.NewRecorder()
+	h.HandlePoll(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200", w.Code)
+	}
+
+	var resp struct {
+		Messages []outputMessage `json:"messages"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+
+	if len(resp.Messages) != 0 {
+		t.Errorf("got %d messages, want 0 (since equals last seq should return nothing)", len(resp.Messages))
+	}
+}
+
 // --- HandleSessions tests ---
 
 func TestSessions_Empty(t *testing.T) {
@@ -429,5 +510,282 @@ func TestLastActivity_UpdatedOnRequest(t *testing.T) {
 	after := h.LastActivity()
 	if !after.After(before) {
 		t.Error("LastActivity was not updated after request")
+	}
+}
+
+// --- HandleResize tests ---
+
+func TestResize_NonexistentSession(t *testing.T) {
+	h := newTestHandler()
+
+	req := httptest.NewRequest("POST", "/api/resize", strings.NewReader(`{"id":"bogus","cols":80,"rows":24}`))
+	req.Header = authHeader(testToken)
+	w := httptest.NewRecorder()
+	h.HandleResize(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("got %d, want 404", w.Code)
+	}
+}
+
+func TestResize_InvalidJSON(t *testing.T) {
+	h := newTestHandler()
+
+	bodies := []struct {
+		name string
+		body string
+	}{
+		{"wrong", "{{{"},
+		{"empty", ""},
+		{"plain text", "hello"},
+	}
+
+	for _, tt := range bodies {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "/api/resize", strings.NewReader(tt.body))
+			req.Header = authHeader(testToken)
+			w := httptest.NewRecorder()
+			h.HandleResize(w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Errorf("body=%q: got %d, want 400", tt.body, w.Code)
+			}
+		})
+	}
+}
+
+func TestResize_ZeroDimensions(t *testing.T) {
+	h := newTestHandler()
+
+	req := httptest.NewRequest("POST", "/api/create", strings.NewReader(`{"cols":80,"rows":24}`))
+	req.Header = authHeader(testToken)
+	w := httptest.NewRecorder()
+	h.HandleCreate(w, req)
+	var created map[string]string
+	json.Unmarshal(w.Body.Bytes(), &created)
+	id := created["id"]
+	defer h.manager.Close(id)
+
+	req = httptest.NewRequest("POST", "/api/resize", strings.NewReader(
+		`{"id":"`+id+`","cols":0,"rows":0}`))
+	req.Header = authHeader(testToken)
+	w = httptest.NewRecorder()
+	h.HandleResize(w, req)
+
+	if w.Code == http.StatusInternalServerError {
+		t.Errorf("got 500, resize with zero dimensions should not panic or 500")
+	}
+}
+
+func TestResize_ValidDimensions(t *testing.T) {
+	h := newTestHandler()
+
+	req := httptest.NewRequest("POST", "/api/create", strings.NewReader(`{"cols":80,"rows":24}`))
+	req.Header = authHeader(testToken)
+	w := httptest.NewRecorder()
+	h.HandleCreate(w, req)
+	var created map[string]string
+	json.Unmarshal(w.Body.Bytes(), &created)
+	id := created["id"]
+	defer h.manager.Close(id)
+
+	req = httptest.NewRequest("POST", "/api/resize", strings.NewReader(
+		`{"id":"`+id+`","cols":120,"rows":40}`))
+	req.Header = authHeader(testToken)
+	w = httptest.NewRecorder()
+	h.HandleResize(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("got %d, want 200", w.Code)
+	}
+}
+
+// --- HandleInput additional tests ---
+
+func TestInput_EmptyData(t *testing.T) {
+	h := newTestHandler()
+
+	req := httptest.NewRequest("POST", "/api/create", strings.NewReader(`{"cols":80,"rows":24}`))
+	req.Header = authHeader(testToken)
+	w := httptest.NewRecorder()
+	h.HandleCreate(w, req)
+	var created map[string]string
+	json.Unmarshal(w.Body.Bytes(), &created)
+	id := created["id"]
+	defer h.manager.Close(id)
+
+	// Empty data is valid input — should not 400 or panic.
+	req = httptest.NewRequest("POST", "/api/input",
+		strings.NewReader(`{"id":"`+id+`","data":""}`))
+	req.Header = authHeader(testToken)
+	w = httptest.NewRecorder()
+	h.HandleInput(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("got %d, want 200 for empty data", w.Code)
+	}
+}
+
+func TestInput_MissingIDField(t *testing.T) {
+	h := newTestHandler()
+
+	// No "id" key — decoded id is "", manager.Write("") should 404.
+	req := httptest.NewRequest("POST", "/api/input",
+		strings.NewReader(`{"data":"hello"}`))
+	req.Header = authHeader(testToken)
+	w := httptest.NewRecorder()
+	h.HandleInput(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("got %d, want 404", w.Code)
+	}
+}
+
+// --- HandleClose additional tests ---
+
+func TestClose_InvalidJSON(t *testing.T) {
+	h := newTestHandler()
+
+	bodies := []struct {
+		name string
+		body string
+	}{
+		{"garbage", "{{{"},
+		{"empty", ""},
+		{"plain text", "hello"},
+	}
+
+	for _, tt := range bodies {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "/api/close",
+				strings.NewReader(tt.body))
+			req.Header = authHeader(testToken)
+			w := httptest.NewRecorder()
+			h.HandleClose(w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Errorf("body=%q: got %d, want 400", tt.body, w.Code)
+			}
+		})
+	}
+}
+
+func TestClose_MissingIDField(t *testing.T) {
+	h := newTestHandler()
+
+	// No "id" key — decoded id is "", manager.Close("") should 404.
+	req := httptest.NewRequest("POST", "/api/close",
+		strings.NewReader(`{}`))
+	req.Header = authHeader(testToken)
+	w := httptest.NewRecorder()
+	h.HandleClose(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("got %d, want 404", w.Code)
+	}
+}
+
+// --- HandleSessions additional tests ---
+
+func TestSessions_AfterCreate(t *testing.T) {
+	h := newTestHandler()
+
+	// Create a session.
+	req := httptest.NewRequest("POST", "/api/create",
+		strings.NewReader(`{"cols":80,"rows":24}`))
+	req.Header = authHeader(testToken)
+	w := httptest.NewRecorder()
+	h.HandleCreate(w, req)
+	var created map[string]string
+	json.Unmarshal(w.Body.Bytes(), &created)
+	id := created["id"]
+	defer h.manager.Close(id)
+
+	// Sessions should now report count=1 and contain the new id.
+	req = httptest.NewRequest("GET", "/api/sessions", nil)
+	req.Header = authHeader(testToken)
+	w = httptest.NewRecorder()
+	h.HandleSessions(w, req)
+
+	var resp struct {
+		Count int      `json:"count"`
+		IDs   []string `json:"ids"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+
+	if resp.Count != 1 {
+		t.Errorf("count = %d, want 1", resp.Count)
+	}
+	if len(resp.IDs) != 1 || resp.IDs[0] != id {
+		t.Errorf("ids = %v, want [%s]", resp.IDs, id)
+	}
+}
+
+func TestSessions_AfterClose(t *testing.T) {
+	h := newTestHandler()
+
+	// Create then close a session.
+	req := httptest.NewRequest("POST", "/api/create",
+		strings.NewReader(`{"cols":80,"rows":24}`))
+	req.Header = authHeader(testToken)
+	w := httptest.NewRecorder()
+	h.HandleCreate(w, req)
+	var created map[string]string
+	json.Unmarshal(w.Body.Bytes(), &created)
+	id := created["id"]
+
+	h.manager.Close(id)
+
+	// Sessions should be back to 0.
+	req = httptest.NewRequest("GET", "/api/sessions", nil)
+	req.Header = authHeader(testToken)
+	w = httptest.NewRecorder()
+	h.HandleSessions(w, req)
+
+	var resp struct {
+		Count int      `json:"count"`
+		IDs   []string `json:"ids"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &resp)
+
+	if resp.Count != 0 {
+		t.Errorf("count = %d, want 0 after close", resp.Count)
+	}
+}
+
+func TestSessions_IDsNotNull(t *testing.T) {
+	h := newTestHandler()
+
+	req := httptest.NewRequest("GET", "/api/sessions", nil)
+	req.Header = authHeader(testToken)
+	w := httptest.NewRecorder()
+	h.HandleSessions(w, req)
+
+	// ids must be [] not null — MATLAB iterates it with a for loop.
+	var resp map[string]json.RawMessage
+	json.Unmarshal(w.Body.Bytes(), &resp)
+
+	if string(resp["ids"]) == "null" {
+		t.Error("ids is null, want []")
+	}
+}
+
+// --- LastActivity additional tests ---
+
+func TestLastActivity_NotUpdatedByUnauthRequest(t *testing.T) {
+	h := newTestHandler()
+
+	before := h.LastActivity()
+	time.Sleep(10 * time.Millisecond)
+
+	// Unauthenticated request — touch() must not be called.
+	req := httptest.NewRequest("GET", "/api/poll?since=0", nil)
+	w := httptest.NewRecorder()
+	h.HandlePoll(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("got %d, want 401", w.Code)
+	}
+	after := h.LastActivity()
+	if after.After(before) {
+		t.Error("LastActivity was updated by an unauthenticated request")
 	}
 }
