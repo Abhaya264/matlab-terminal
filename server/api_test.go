@@ -734,17 +734,24 @@ func TestSessions_AfterClose(t *testing.T) {
 
 	h.manager.Close(id)
 
-	// Sessions should be back to 0.
-	req = httptest.NewRequest("GET", "/api/sessions", nil)
-	req.Header = authHeader(testToken)
-	w = httptest.NewRecorder()
-	h.HandleSessions(w, req)
-
+	// Session removal from the map happens asynchronously in the read
+	// goroutine. Poll until the count drops or timeout.
+	deadline := time.Now().Add(3 * time.Second)
 	var resp struct {
 		Count int      `json:"count"`
 		IDs   []string `json:"ids"`
 	}
-	json.Unmarshal(w.Body.Bytes(), &resp)
+	for time.Now().Before(deadline) {
+		req = httptest.NewRequest("GET", "/api/sessions", nil)
+		req.Header = authHeader(testToken)
+		w = httptest.NewRecorder()
+		h.HandleSessions(w, req)
+		json.Unmarshal(w.Body.Bytes(), &resp)
+		if resp.Count == 0 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 
 	if resp.Count != 0 {
 		t.Errorf("count = %d, want 0 after close", resp.Count)

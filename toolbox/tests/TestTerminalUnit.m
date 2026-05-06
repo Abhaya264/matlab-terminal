@@ -395,5 +395,131 @@ classdef TestTerminalUnit < matlab.unittest.TestCase
                     sprintf('Theme "%s" should be dark', darkThemes(i)));
             end
         end
+
+        %% --- Agent Options ---
+
+        function testSetAgentOptionsValidStruct(testCase)
+            original = [];
+            if ispref('Terminal', 'AgentOptions')
+                original = getpref('Terminal', 'AgentOptions');
+            end
+            cleanup = onCleanup(@() restoreAgentPref(original));
+
+            opts = struct('Agent', "claude", 'Toolkits', ["matlab"]);
+            Terminal.setAgentOptions(opts);
+            retrieved = Terminal.getAgentOptions();
+            testCase.verifyEqual(string(retrieved.Agent), "claude");
+            testCase.verifyEqual(string(retrieved.Toolkits), "matlab");
+        end
+
+        function testSetAgentOptionsAllAgents(testCase)
+            original = [];
+            if ispref('Terminal', 'AgentOptions')
+                original = getpref('Terminal', 'AgentOptions');
+            end
+            cleanup = onCleanup(@() restoreAgentPref(original));
+
+            agents = ["claude", "amp", "gemini", "cursor", "codex", "copilot"];
+            for i = 1:numel(agents)
+                opts = struct('Agent', agents(i), 'Toolkits', ["matlab"]);
+                Terminal.setAgentOptions(opts);
+                retrieved = Terminal.getAgentOptions();
+                testCase.verifyEqual(string(retrieved.Agent), agents(i));
+            end
+        end
+
+        function testSetAgentOptionsSimulinkToolkit(testCase)
+            original = [];
+            if ispref('Terminal', 'AgentOptions')
+                original = getpref('Terminal', 'AgentOptions');
+            end
+            cleanup = onCleanup(@() restoreAgentPref(original));
+
+            opts = struct('Agent', "claude", 'Toolkits', ["matlab", "simulink"]);
+            Terminal.setAgentOptions(opts);
+            retrieved = Terminal.getAgentOptions();
+            testCase.verifyTrue(ismember("simulink", string(retrieved.Toolkits)));
+        end
+
+        function testSetAgentOptionsInvalidAgent(testCase)
+            testCase.verifyError(...
+                @() Terminal.setAgentOptions(struct('Agent', "invalid", 'Toolkits', ["matlab"])), ...
+                'Terminal:InvalidAgentOptions');
+        end
+
+        function testSetAgentOptionsInvalidToolkit(testCase)
+            testCase.verifyError(...
+                @() Terminal.setAgentOptions(struct('Agent', "claude", 'Toolkits', ["bogus"])), ...
+                'Terminal:InvalidAgentOptions');
+        end
+
+        function testSetAgentOptionsMissingAgent(testCase)
+            testCase.verifyError(...
+                @() Terminal.setAgentOptions(struct('Toolkits', ["matlab"])), ...
+                'Terminal:InvalidAgentOptions');
+        end
+
+        function testSetAgentOptionsMissingToolkits(testCase)
+            testCase.verifyError(...
+                @() Terminal.setAgentOptions(struct('Agent', "claude")), ...
+                'Terminal:InvalidAgentOptions');
+        end
+
+        function testSetAgentOptionsNotAStruct(testCase)
+            testCase.verifyError(...
+                @() Terminal.setAgentOptions("not a struct"), ...
+                'Terminal:InvalidAgentOptions');
+        end
+
+        function testGetAgentOptionsErrorsWhenUnset(testCase)
+            original = [];
+            if ispref('Terminal', 'AgentOptions')
+                original = getpref('Terminal', 'AgentOptions');
+            end
+            cleanup = onCleanup(@() restoreAgentPref(original));
+
+            if ispref('Terminal', 'AgentOptions')
+                rmpref('Terminal', 'AgentOptions');
+            end
+            testCase.verifyError(...
+                @() Terminal.getAgentOptions(), ...
+                'Terminal:NoAgentOptions');
+        end
+
+        function testResetAgentOptionsClearsPreference(testCase)
+            original = [];
+            if ispref('Terminal', 'AgentOptions')
+                original = getpref('Terminal', 'AgentOptions');
+            end
+            cleanup = onCleanup(@() restoreAgentPref(original));
+
+            Terminal.setAgentOptions(struct('Agent', "claude", 'Toolkits', ["matlab"]));
+            Terminal.resetAgentOptions();
+            testCase.verifyError(...
+                @() Terminal.getAgentOptions(), ...
+                'Terminal:NoAgentOptions');
+        end
+
+        %% --- TerminalVersion ---
+
+        function testTerminalVersionFunctionExists(testCase)
+            testCase.verifyTrue(exist('TerminalVersion', 'file') > 0);
+        end
+
+        function testTerminalVersionReturnsDev(testCase)
+            v = TerminalVersion();
+            testCase.verifyClass(v, 'string');
+            testCase.verifyTrue(strlength(v) > 0);
+        end
+    end
+end
+
+function restoreAgentPref(original)
+    if isempty(original)
+        if ispref('Terminal', 'AgentOptions')
+            rmpref('Terminal', 'AgentOptions');
+        end
+    else
+        setpref('Terminal', 'AgentOptions', original);
     end
 end
