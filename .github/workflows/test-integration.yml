@@ -1,0 +1,107 @@
+# Copyright 2026 The MathWorks, Inc.
+
+name: Integration Tests
+
+on:
+  workflow_call:
+    inputs:
+      matlab_version:
+        type: string
+        default: 'latest'
+      os:
+        type: string
+        default: 'all'
+
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to test'
+        required: true
+        default: 'main'
+        type: string
+      matlab_version:
+        description: 'MATLAB version (e.g., R2025b, R2026a)'
+        required: true
+        default: 'latest'
+        type: string
+      os:
+        description: 'Runner OS'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - ubuntu-latest
+          - windows-latest
+
+jobs:
+  prepare-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      os_matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Set OS Matrix
+        id: set-matrix
+        run: |
+          if [ "${{ inputs.os || 'all' }}" == "all" ]; then
+            echo 'matrix=["ubuntu-latest", "windows-latest"]' >> $GITHUB_OUTPUT
+          else
+            echo 'matrix=["${{ inputs.os }}"]' >> $GITHUB_OUTPUT
+          fi
+
+  test:
+    needs: prepare-matrix
+    name: Integration (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(needs.prepare-matrix.outputs.os_matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.branch || github.ref }}
+
+      - name: Read Go version from go.mod
+        id: go-version
+        shell: bash
+        run: |
+          GO_VERSION=$(grep "^go " server/go.mod | awk '{print $2}')
+          echo "version=$GO_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ steps.go-version.outputs.version }}
+          cache-dependency-path: server/go.sum
+
+      - name: Build server binary
+        shell: bash
+        run: |
+          cd server
+          case "${{ matrix.os }}" in
+            ubuntu-latest)  MATLAB_ARCH="glnxa64" ;;
+            windows-latest) MATLAB_ARCH="win64" ;;
+          esac
+          mkdir -p ../dist/$MATLAB_ARCH
+          go build -o ../dist/$MATLAB_ARCH/matlab-terminal-server${{ matrix.os == 'windows-latest' && '.exe' || '' }} .
+
+      - name: Setup MATLAB
+        uses: matlab-actions/setup-matlab@v2
+        with:
+          release: ${{ inputs.matlab_version || 'latest' }}
+
+      - name: Run Integration Tests
+        uses: matlab-actions/run-tests@v2
+        with:
+          source-folder: toolbox
+          select-by-folder: toolbox/tests
+          test-results-junit: test-results/results.xml
+
+      - name: Upload Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-results-${{ matrix.os }}
+          path: test-results/results.xml

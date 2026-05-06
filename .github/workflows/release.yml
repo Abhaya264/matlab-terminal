@@ -96,7 +96,7 @@ jobs:
   validate-build:
     name: Validate build
     needs: build-mltbx
-    uses: ./.github/workflows/validate_build.yml
+    uses: ./.github/workflows/test-release.yml
     with:
       matlab_version: 'latest'
       os: 'all'       

@@ -1,6 +1,6 @@
 # Copyright 2026 The MathWorks, Inc.
 
-name: Validate build
+name: Test Release
 
 on:
   # Trigger 1: Called from release.yml (Automatic)
@@ -53,7 +53,7 @@ jobs:
 
   build-test:
     needs: prepare-matrix
-    name: Validate build on ${{ matrix.os }}
+    name: Test Release (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -62,7 +62,7 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # Scenario A: Running Manually -> Download from published GitHub Release
       - name: Download .mltbx from GitHub Release (Manual)

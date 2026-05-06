@@ -12,12 +12,19 @@ permissions:
   contents: read
 
 jobs:
-  run-validation-tests:
-    name: Validation Tests
-    uses: ./.github/workflows/run_automated_tests.yml
+  unit-tests:
+    name: Unit Tests
+    uses: ./.github/workflows/test-unit.yml
     with:
       matlab_version: 'latest'
       os: 'ubuntu-latest'
+
+  integration-tests:
+    name: Integration Tests
+    uses: ./.github/workflows/test-integration.yml
+    with:
+      matlab_version: 'latest'
+      os: 'all'
 
   build-server:
     name: Build Go Server (${{ matrix.matlab_arch }})
@@ -47,10 +54,16 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Read Go version from go.mod
+        id: go-version
+        run: |
+          GO_VERSION=$(grep "^go " go.mod | awk '{print $2}')
+          echo "version=$GO_VERSION" >> $GITHUB_OUTPUT
+
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.21'
-          cache: false
+          go-version: ${{ steps.go-version.outputs.version }}
+          cache-dependency-path: server/go.sum
 
       - name: Vet
         run: GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go vet ./...
