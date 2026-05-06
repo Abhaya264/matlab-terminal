@@ -1,27 +1,13 @@
 % Copyright 2026 The MathWorks, Inc.
 
 classdef TestTerminalIntegration < matlab.unittest.TestCase
-    %TESTTERMINALINTEGRATION Integration tests for Terminal that require a
-    %   display (uifigure) and the bundled server binary.
+    %TESTTERMINALINTEGRATION Integration tests for Terminal.
+    %   Tests that need a display (uifigure) skip gracefully in headless
+    %   environments. Tests that only validate error paths or class
+    %   properties run everywhere.
 
     properties (Access = private)
         Terminals = Terminal.empty  % track instances for cleanup
-    end
-
-    methods (TestClassSetup)
-        function checkPrerequisites(testCase)
-            % Skip the entire class if we cannot create a Terminal.
-            % This covers: no display, no server binary, no uifigure, etc.
-            try
-                t = Terminal(WindowStyle="normal");
-                pause(1);  % let server start
-                delete(t);
-            catch me
-                testCase.assumeFail(sprintf( ...
-                    'Cannot create Terminal (%s) — skipping integration tests.', ...
-                    me.message));
-            end
-        end
     end
 
     methods (TestMethodTeardown)
@@ -32,10 +18,41 @@ classdef TestTerminalIntegration < matlab.unittest.TestCase
         end
     end
 
+    methods (Access = private)
+        function requireDisplay(testCase)
+            %REQUIREDISPLAY Skip the current test if no display is available.
+            try
+                fig = uifigure('Visible', 'off');
+                delete(fig);
+                fprintf('[TestDebug] uifigure(Visible=off) succeeded\n');
+            catch me
+                fprintf('[TestDebug] uifigure(Visible=off) FAILED: %s\n', me.message);
+                testCase.assumeFail(sprintf( ...
+                    'No display available (%s) — skipping.', me.message));
+            end
+        end
+
+        function requireServer(testCase)
+            %REQUIRESERVER Skip the current test if the server binary is not found.
+            testCase.requireDisplay();
+            try
+                t = Terminal(WindowStyle="normal");
+                pause(1);
+                delete(t);
+                fprintf('[TestDebug] Terminal creation succeeded\n');
+            catch me
+                fprintf('[TestDebug] Terminal creation FAILED: %s (%s)\n', me.message, me.identifier);
+                testCase.assumeFail(sprintf( ...
+                    'Cannot create Terminal (%s) — skipping.', me.message));
+            end
+        end
+    end
+
     %% --- Constructor tests ---
 
     methods (Test)
         function testDefaultConstructor(testCase)
+            testCase.requireServer();
             t = Terminal();
             testCase.addTeardown(@() safeDelete(t));
             testCase.Terminals(end+1) = t;
@@ -43,24 +60,28 @@ classdef TestTerminalIntegration < matlab.unittest.TestCase
         end
 
         function testConstructorWithName(testCase)
+            testCase.requireServer();
             t = Terminal(Name="Build");
             testCase.addTeardown(@() safeDelete(t));
             testCase.verifyClass(t, 'Terminal');
         end
 
         function testConstructorNormal(testCase)
+            testCase.requireServer();
             t = Terminal(WindowStyle="normal");
             testCase.addTeardown(@() safeDelete(t));
             testCase.verifyClass(t, 'Terminal');
         end
 
         function testConstructorDocked(testCase)
+            testCase.requireServer();
             t = Terminal(WindowStyle="docked");
             testCase.addTeardown(@() safeDelete(t));
             testCase.verifyClass(t, 'Terminal');
         end
 
         function testConstructorWithTheme(testCase)
+            testCase.requireServer();
             t = Terminal(Theme="dracula");
             testCase.addTeardown(@() safeDelete(t));
             testCase.verifyClass(t, 'Terminal');
@@ -68,6 +89,7 @@ classdef TestTerminalIntegration < matlab.unittest.TestCase
         end
 
         function testConstructorWithShell(testCase)
+            testCase.requireServer();
             if ispc
                 shell = "cmd.exe";
             else
@@ -80,6 +102,7 @@ classdef TestTerminalIntegration < matlab.unittest.TestCase
         end
 
         function testConstructorAllOptions(testCase)
+            testCase.requireServer();
             if ispc
                 shell = "cmd.exe";
             else
@@ -112,6 +135,7 @@ classdef TestTerminalIntegration < matlab.unittest.TestCase
         end
 
         function testConstructorWithParent(testCase)
+            testCase.requireServer();
             fig = uifigure('Visible', 'off');
             testCase.addTeardown(@() delete(fig));
             t = Terminal(fig);
@@ -120,6 +144,7 @@ classdef TestTerminalIntegration < matlab.unittest.TestCase
         end
 
         function testConstructorWithPanel(testCase)
+            testCase.requireServer();
             fig = uifigure('Visible', 'off');
             testCase.addTeardown(@() delete(fig));
             panel = uipanel(fig, 'Position', [10 10 400 300]);
@@ -131,6 +156,7 @@ classdef TestTerminalIntegration < matlab.unittest.TestCase
         %% --- Lifecycle tests ---
 
         function testDeleteCleansUp(testCase)
+            testCase.requireServer();
             t = Terminal(WindowStyle="normal");
             testCase.verifyTrue(isvalid(t));
             delete(t);
@@ -138,6 +164,7 @@ classdef TestTerminalIntegration < matlab.unittest.TestCase
         end
 
         function testMultipleTerminals(testCase)
+            testCase.requireServer();
             t1 = Terminal(Name="Term1", WindowStyle="normal");
             testCase.addTeardown(@() safeDelete(t1));
             t2 = Terminal(Name="Term2", WindowStyle="normal");
@@ -148,6 +175,7 @@ classdef TestTerminalIntegration < matlab.unittest.TestCase
         end
 
         function testCloseAll(testCase)
+            testCase.requireServer();
             Terminal(Name="CloseMe1", WindowStyle="normal");
             Terminal(Name="CloseMe2", WindowStyle="normal");
             testCase.verifyGreaterThanOrEqual(numel(Terminal.list()), 2);
@@ -158,6 +186,7 @@ classdef TestTerminalIntegration < matlab.unittest.TestCase
         end
 
         function testListReflectsCreationAndDeletion(testCase)
+            testCase.requireServer();
             before = numel(Terminal.list());
             t = Terminal(WindowStyle="normal");
             testCase.verifyEqual(numel(Terminal.list()), before + 1);
@@ -168,6 +197,7 @@ classdef TestTerminalIntegration < matlab.unittest.TestCase
         %% --- Theme tests ---
 
         function testLiveThemeChange(testCase)
+            testCase.requireServer();
             t = Terminal(Theme="dark", WindowStyle="normal");
             testCase.addTeardown(@() safeDelete(t));
             testCase.verifyEqual(t.Theme, "dark");
@@ -177,6 +207,7 @@ classdef TestTerminalIntegration < matlab.unittest.TestCase
         end
 
         function testLiveThemeChangeAllPresets(testCase)
+            testCase.requireServer();
             t = Terminal(WindowStyle="normal");
             testCase.addTeardown(@() safeDelete(t));
 
@@ -189,6 +220,7 @@ classdef TestTerminalIntegration < matlab.unittest.TestCase
         end
 
         function testLiveThemeChangeCustomStruct(testCase)
+            testCase.requireServer();
             t = Terminal(WindowStyle="normal");
             testCase.addTeardown(@() safeDelete(t));
 
@@ -198,7 +230,7 @@ classdef TestTerminalIntegration < matlab.unittest.TestCase
         end
 
         function testConstructorWithDefaultTheme(testCase)
-            % Verify that the default theme preference is used.
+            testCase.requireServer();
             original = Terminal.getDefaultTheme();
             testCase.addTeardown(@() Terminal.setDefaultTheme(original));
 
@@ -209,6 +241,7 @@ classdef TestTerminalIntegration < matlab.unittest.TestCase
         end
 
         function testConstructorThemeOverridesDefault(testCase)
+            testCase.requireServer();
             original = Terminal.getDefaultTheme();
             testCase.addTeardown(@() Terminal.setDefaultTheme(original));
 
@@ -221,28 +254,23 @@ classdef TestTerminalIntegration < matlab.unittest.TestCase
         %% --- UI Layout and State Tests ---
 
         function testTerminalVisibilityToggle(testCase)
-            % Tests that the terminal does not throw errors when its parent
-            % figure changes visibility state dynamically.
+            testCase.requireServer();
             fig = uifigure();
             testCase.addTeardown(@() delete(fig));
-            
+
             t = Terminal(fig);
             testCase.addTeardown(@() safeDelete(t));
-            
-            % Allow time for the server/UI to connect
+
             pause(0.5);
 
-            % Hide the parent figure
             fig.Visible = 'off';
-            pause(0.1); 
+            pause(0.1);
             testCase.verifyEqual(fig.Visible, char('off'));
 
-            % Show it again
             fig.Visible = 'on';
             pause(0.1);
             testCase.verifyEqual(fig.Visible, char('on'));
-            
-            % We verify that the terminal object is still valid and unharmed
+
             testCase.verifyTrue(isvalid(t), 'Terminal should remain valid after visibility toggle');
         end
     end
