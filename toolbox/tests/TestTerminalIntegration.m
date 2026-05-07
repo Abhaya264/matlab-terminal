@@ -217,6 +217,16 @@ classdef TestTerminalIntegration < matlab.unittest.TestCase
             testCase.addTeardown(@() safeDelete(t));
             testCase.verifyEqual(t.Theme, "dracula");
         end
+
+        function testConstructorWithCustomTheme(testCase)
+            custom = struct('background', '#1e1e2e', 'foreground', '#cdd6f4', ...
+                'cursor', '#f5e0dc');
+            t = Terminal(Theme=custom, WindowStyle="normal");
+            testCase.addTeardown(@() safeDelete(t));
+            testCase.verifyTrue(isstruct(t.Theme));
+            testCase.verifyEqual(t.Theme.background, '#1e1e2e');
+            testCase.verifyEqual(t.Theme.foreground, '#cdd6f4');
+        end
     end
 end
 
