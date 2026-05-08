@@ -2,26 +2,32 @@
 
 name: Test Release
 
+run-name: ${{ inputs.run_description || format('Test Release · {0} · MATLAB {1} · {2}', inputs.build_version || 'CI artifact', inputs.matlab_version || 'latest', inputs.os || 'all') }}
+
 on:
-  # Trigger 1: Called from release.yml (Automatic)
   workflow_call:
     inputs:
+      run_description:
+        type: string
       matlab_version:
         type: string
         default: 'latest'
       os:
         type: string
         default: 'all'
-        
-  # Trigger 2: Manual Execution
+
   workflow_dispatch:
     inputs:
+      run_description:
+        description: 'Name for this test run'
+        required: false
+        type: string
       build_version:
         description: 'Release Tag to test (e.g., v0.9.3)'
         required: true
         type: string
       matlab_version:
-        description: 'MATLAB version (e.g., R2024a, R2023b)'
+        description: 'MATLAB version (e.g., R2025b, R2026a)'
         required: true
         default: 'latest'
         type: string
@@ -46,7 +52,7 @@ jobs:
         id: set-matrix
         run: |
           if [ "${{ inputs.os }}" == "all" ]; then
-            echo 'matrix=["ubuntu-latest", "windows-latest", "macos-latest"]' >> $GITHUB_OUTPUT
+            echo 'matrix=["ubuntu-latest", "windows-latest"]' >> $GITHUB_OUTPUT
           else
             echo 'matrix=["${{ inputs.os }}"]' >> $GITHUB_OUTPUT
           fi

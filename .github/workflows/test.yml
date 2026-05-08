@@ -1,10 +1,14 @@
 # Copyright 2026 The MathWorks, Inc.
 
-name: Integration Tests
+name: Tests
+
+run-name: ${{ inputs.run_description || format('Tests · MATLAB {0} · {1}', inputs.matlab_version || 'latest', inputs.os || 'all') }}
 
 on:
   workflow_call:
     inputs:
+      run_description:
+        type: string
       matlab_version:
         type: string
         default: 'latest'
@@ -14,6 +18,10 @@ on:
 
   workflow_dispatch:
     inputs:
+      run_description:
+        description: 'Name for this test run'
+        required: false
+        type: string
       branch:
         description: 'Branch to test'
         required: true
@@ -25,7 +33,7 @@ on:
         default: 'latest'
         type: string
       os:
-        description: 'Runner OS'
+        description: 'Runner OS for integration tests'
         required: true
         default: 'all'
         type: choice
@@ -49,9 +57,45 @@ jobs:
             echo 'matrix=["${{ inputs.os }}"]' >> $GITHUB_OUTPUT
           fi
 
-  test:
+# ─── Go Tests ───────────────────────────────────────────────────────────────
+
+  go-unit:
     needs: prepare-matrix
-    name: Integration (${{ matrix.os }})
+    name: "Unit: Go (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(needs.prepare-matrix.outputs.os_matrix) }}
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.branch || github.ref }}
+
+      - name: Read Go version from go.mod
+        id: go-version
+        run: |
+          GO_VERSION=$(grep "^go " go.mod | awk '{print $2}')
+          echo "version=$GO_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ steps.go-version.outputs.version }}
+          cache-dependency-path: server/go.sum
+
+      - name: Test
+        run: go test -v -count=1 ./...
+
+# ─── MATLAB Tests ───────────────────────────────────────────────────────────────
+
+  matlab:
+    needs: [go-unit, prepare-matrix]
+    name: "MATLAB (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -92,16 +136,16 @@ jobs:
         with:
           release: ${{ inputs.matlab_version || 'latest' }}
 
+      - name: Run Unit Tests
+        uses: matlab-actions/run-tests@v2
+        with:
+          source-folder: toolbox
+          select-by-folder: toolbox/tests
+          test-results-junit: test-results/unit-results.xml
+
       - name: Run Integration Tests
         uses: matlab-actions/run-tests@v2
         with:
           source-folder: toolbox
           select-by-folder: toolbox/tests
-          test-results-junit: test-results/results.xml
-
-      - name: Upload Results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: integration-test-results-${{ matrix.os }}
-          path: test-results/results.xml
+          test-results-junit: test-results/integration-results.xml
