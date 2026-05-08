@@ -57,7 +57,7 @@ jobs:
             echo 'matrix=["${{ inputs.os }}"]' >> $GITHUB_OUTPUT
           fi
 
-  build-test:
+  test-mltbx:
     needs: prepare-matrix
     name: Test Release (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

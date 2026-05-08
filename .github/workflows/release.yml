@@ -93,17 +93,26 @@ jobs:
           name: Terminal.mltbx
           path: dist/Terminal.mltbx
   
-  validate-build:
-    name: Validate build
-    needs: build-mltbx
+  compatibility:
+    name: Compatibility Tests
+    needs: build-server
+    uses: ./.github/workflows/test.yml
+    with:
+      run_description: 'Compatibility Tests'
+      matlab_versions: '["R2024b", "R2025a", "R2025b", "R2026a"]'
+      os: 'all'
+
+  test-mltbx:
+    name: Test mltbx
+    needs: [build-mltbx, compatibility]
     uses: ./.github/workflows/test-release.yml
     with:
       matlab_version: 'latest'
-      os: 'all'       
+      os: 'all'
 
   release:
     name: Create GitHub Release
-    needs: validate-build
+    needs: test-mltbx
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6

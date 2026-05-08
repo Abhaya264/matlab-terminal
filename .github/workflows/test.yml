@@ -2,16 +2,17 @@
 
 name: Tests
 
-run-name: ${{ inputs.run_description || format('Tests · MATLAB {0} · {1}', inputs.matlab_version || 'latest', inputs.os || 'all') }}
+run-name: ${{ inputs.run_description || format('Tests · MATLAB {0} · {1}', inputs.matlab_versions || '["latest"]', inputs.os || 'all') }}
 
 on:
   workflow_call:
     inputs:
       run_description:
         type: string
-      matlab_version:
+      matlab_versions:
+        description: 'JSON array of MATLAB versions to test'
         type: string
-        default: 'latest'
+        default: '["latest"]'
       os:
         type: string
         default: 'all'
@@ -27,13 +28,13 @@ on:
         required: true
         default: 'main'
         type: string
-      matlab_version:
-        description: 'MATLAB version (e.g., R2025b, R2026a)'
+      matlab_versions:
+        description: 'JSON array of MATLAB versions (e.g., ["R2024b","R2026a"])'
         required: true
-        default: 'latest'
+        default: '["latest"]'
         type: string
       os:
-        description: 'Runner OS for integration tests'
+        description: 'Runner OS'
         required: true
         default: 'all'
         type: choice
@@ -95,12 +96,13 @@ jobs:
 
   matlab:
     needs: [go-unit, prepare-matrix]
-    name: "MATLAB (${{ matrix.os }})"
+    name: "MATLAB ${{ matrix.matlab_version }} (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: ${{ fromJSON(needs.prepare-matrix.outputs.os_matrix) }}
+        matlab_version: ${{ fromJSON(inputs.matlab_versions || '["latest"]') }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -134,7 +136,7 @@ jobs:
       - name: Setup MATLAB
         uses: matlab-actions/setup-matlab@v2
         with:
-          release: ${{ inputs.matlab_version || 'latest' }}
+          release: ${{ matrix.matlab_version }}
 
       - name: Run Unit Tests
         uses: matlab-actions/run-tests@v2
