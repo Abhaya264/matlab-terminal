@@ -42,7 +42,7 @@ body:
     id: environment
     attributes:
       label: Environment
-      description: MATLAB version, OS, environment (Desktop/Online/Container/Proxy), toolbox version (`Terminal.version()`).
+      description: MATLAB version, OS, environment (Desktop/Online/Container/Proxy), toolbox version (`terminal.version()`).
       placeholder: |
         - MATLAB: R2024b
         - OS: Windows 11
