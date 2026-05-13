@@ -34,7 +34,7 @@ body:
       label: Steps to reproduce the issue
       description: Provide a sequence of steps to reproduce the issue.
       placeholder: |
-        1. Run `t = Terminal()`
+        1. Run `t = terminal()`
         2. Run `t.Theme = "dracula"`
         3. ...
 
