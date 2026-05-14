@@ -52,7 +52,7 @@ Embed a fully functional terminal emulator into the MATLAB Desktop, enabling use
 ┌─────────────────────────────────────────┐
 │ MATLAB                                  │
 │                                         │
-│  Terminal.m ──── uihtml ──── xterm.js   │
+│  terminal.m ──── uihtml ──── xterm.js   │
 │      │              ▲                   │
 │      │              │ Data channel      │
 │      │              ▼                   │
@@ -118,7 +118,7 @@ Detection: MATLAB uses `isMATLABReleaseOlderThan('R2023a')`, JS uses `typeof com
 - The Go binary also self-terminates after an idle timeout as a safety net
 
 ### Decision 5: Asset bundling via .mat file
-**Choice**: Web assets (HTML, CSS, JS) and the server binary are bundled in a `web_assets.mat` file within the .mltbx toolbox. They are extracted to `prefdir/matlab-terminal/` on first run.
+**Choice**: Web assets (HTML, CSS, JS) and the server binary are bundled in a `web_assets.mat` file within the .mltbx toolbox. They are extracted into the toolbox directory itself (`html/` and `bin/matlab-terminal-server/<arch>/`) on first run. Only the binary for the current platform is extracted.
 
 **Rationale**:
 - `packageToolbox` silently drops `.html`, `.css`, `.js`, and binary executable files
@@ -150,7 +150,7 @@ The server binary is bundled in `web_assets.mat` inside the `.mltbx` and extract
 ```
 matlab-terminal/
 ├── toolbox/                        # MATLAB Toolbox (.mltbx source)
-│   ├── Terminal.m                  # Main MATLAB class
+│   ├── terminal.m                  # Main MATLAB class
 │   ├── TerminalVersion.m          # Version string (stamped at build time)
 │   ├── openTerminal.m              # Simple launcher for Apps tab
 │   ├── web_assets.mat              # Bundled HTML/CSS/JS + binary (generated)
@@ -246,7 +246,7 @@ When the terminal panel is undocked or moved, MATLAB reloads the HTML page insid
 
 ### Instance Registry
 
-A persistent variable inside a private static method tracks all live `Terminal` instances. `Terminal.list()` returns handles (auto-pruning deleted ones), `Terminal.closeAll()` deletes them all. Instances register on construction and deregister on `delete`.
+A persistent variable inside a private static method tracks all live `terminal` instances. `terminal.list()` returns handles (auto-pruning deleted ones), `terminal.closeAll()` deletes them all. Instances register on construction and deregister on `delete`.
 
 ## 8. Known Limitations
 

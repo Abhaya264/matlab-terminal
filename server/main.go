@@ -101,15 +101,27 @@ func main() {
 	parentPID := os.Getppid()
 	go monitorParent(parentPID)
 
-	// Idle timeout based on last API activity.
+	// Idle timeout: counter-based instead of wall-clock timestamps.
+	// Each tick increments a counter; any API request resets it to 0.
+	// This is sleep/resume safe — the OS suspends the goroutine during
+	// sleep, so no ticks fire and the counter doesn't jump on wake.
 	go func() {
-		time.Sleep(5 * time.Second) // grace period on startup
-		ticker := time.NewTicker(5 * time.Second)
+		const checkInterval = 5 * time.Second
+		maxTicks := int64(idleTimeout / checkInterval)
+		if maxTicks < 1 {
+			maxTicks = 1
+		}
+		time.Sleep(checkInterval) // grace period on startup
+		ticker := time.NewTicker(checkInterval)
 		defer ticker.Stop()
 		for range ticker.C {
-			if time.Since(apiHandler.LastActivity()) >= idleTimeout {
-				log.Println("idle timeout reached, shutting down")
-				os.Exit(0)
+			if apiHandler.IncrementIdle() >= maxTicks {
+				if manager.Count() == 0 {
+					log.Println("idle timeout reached with no active sessions, shutting down")
+					os.Exit(0)
+				}
+				log.Println("idle timeout reached but sessions still active, resetting counter")
+				apiHandler.ResetIdle()
 			}
 		}
 	}()

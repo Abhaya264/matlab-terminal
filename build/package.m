@@ -3,7 +3,7 @@
 function package(toolboxVersion)
 %PACKAGE Build the Terminal.mltbx toolbox package.
 %
-%   package()          — build using the version in TerminalVersion.m
+%   package()          — build using the version in terminalVersion.m
 %   package("1.2.0")   — build with an explicit version string
 %
 % Examples:
@@ -25,7 +25,7 @@ function package(toolboxVersion)
     % --- Step 1: Resolve version ---
     if toolboxVersion == ""
         addpath(toolboxDir);
-        toolboxVersion = TerminalVersion();
+        toolboxVersion = terminalVersion();
     end
     if startsWith(toolboxVersion, 'v')
         toolboxVersion = extractAfter(toolboxVersion, 1);
@@ -48,10 +48,10 @@ function package(toolboxVersion)
         end
     end
 
-    % Stamp TerminalVersion.m with the full version (including suffix).
-    versionFile = fullfile(toolboxDir, 'TerminalVersion.m');
+    % Stamp terminalVersion.m with the full version (including suffix).
+    versionFile = fullfile(toolboxDir, 'terminalVersion.m');
     fid = fopen(versionFile, 'w');
-    fprintf(fid, 'function v = TerminalVersion()\n');
+    fprintf(fid, 'function v = terminalVersion()\n');
     fprintf(fid, '%%TERMINALVERSION Return the installed toolbox version.\n');
     fprintf(fid, '    v = "%s";\n', toolboxVersion);
     fprintf(fid, 'end\n');
@@ -59,7 +59,7 @@ function package(toolboxVersion)
 
     % --- Step 2: Bundle web assets into .mat ---
     % packageToolbox silently drops .html/.css/.js files, so we embed them
-    % in a .mat file that Terminal.m extracts at runtime.
+    % in a .mat file that terminal.m extracts at runtime.
     run(fullfile(projectDir, 'build', 'build_assets.m'));
 
     % --- Step 3: Build .mltbx ---
@@ -79,7 +79,7 @@ function package(toolboxVersion)
     opts.MaximumMatlabRelease = '';
     opts.ToolboxMatlabPath = toolboxDir;
     opts.ToolboxImageFile = fullfile(toolboxDir, 'images', 'matlab-terminal.jpeg');
-    opts.ToolboxGettingStartedGuide = fullfile(toolboxDir, 'doc', 'GettingStarted.m');
+    opts.ToolboxGettingStartedGuide = fullfile(toolboxDir, 'doc', 'GettingStarted.mlx');
     opts.AppGalleryFiles = fullfile(toolboxDir, 'openTerminal.m');
     opts.OutputFile = outputFile;
 

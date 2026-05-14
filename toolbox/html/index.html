@@ -12,8 +12,8 @@
     <div id="loading-overlay">
         <div class="loading-content">
             <div class="loading-spinner"></div>
-            <div class="loading-title">Starting Terminal...</div>
-            <div class="loading-shortcuts">
+            <div id="loading-title" class="loading-title">Starting Terminal...</div>
+            <div id="loading-shortcuts" class="loading-shortcuts">
                 <table>
                     <tr><td class="key">Ctrl+Shift+C</td><td>Copy selection</td></tr>
                     <tr><td class="key">Ctrl+Shift+V</td><td>Paste</td></tr>
@@ -156,6 +156,25 @@
                         }
                     }
                     break;
+                case 'restarting':
+                    // Server died — show overlay and prepare for fresh init.
+                    var overlay = document.getElementById('loading-overlay');
+                    if (overlay) {
+                        document.getElementById('loading-title').textContent = 'Restarting Terminal...';
+                        document.getElementById('loading-shortcuts').style.display = 'none';
+                        overlay.classList.remove('hidden');
+                    }
+                    // Dispose all existing tabs — PTY sessions are gone.
+                    for (var rid in tabs) {
+                        if (tabs[rid].terminal) tabs[rid].terminal.dispose();
+                        if (tabs[rid].tab) tabs[rid].tab.remove();
+                        if (tabs[rid].wrapper) tabs[rid].wrapper.remove();
+                    }
+                    tabs = {};
+                    activeTabId = null;
+                    pendingTabs = [];
+                    initialized = false;
+                    break;
                 case 'batch':
                     // Process a batch of messages from MATLAB polling.
                     var msgs = data.messages;
@@ -210,6 +229,7 @@
         function onCreated(event) { handleMATLABMessage(event.Data); }
         function onBatch(event) { handleMATLABMessage(event.Data); }
         function onTheme(event) { handleMATLABMessage(event.Data); }
+        function onRestarting(event) { handleMATLABMessage({ type: 'restarting' }); }
         function onDataChanged(event) { handleMATLABMessage(event.Data); }
 
         window.setup = function (component) {
@@ -226,6 +246,7 @@
                 htmlComp.removeEventListener('created', onCreated);
                 htmlComp.removeEventListener('batch', onBatch);
                 htmlComp.removeEventListener('theme', onTheme);
+                htmlComp.removeEventListener('restarting', onRestarting);
                 htmlComp.removeEventListener('DataChanged', onDataChanged);
             }
 
@@ -257,6 +278,7 @@
                 component.addEventListener('created', onCreated);
                 component.addEventListener('batch', onBatch);
                 component.addEventListener('theme', onTheme);
+                component.addEventListener('restarting', onRestarting);
             } else {
                 // Legacy: listen for Data channel changes.
                 component.addEventListener('DataChanged', onDataChanged);
@@ -703,6 +725,120 @@
         addTabBtn.addEventListener('click', function () {
             createTab();
         });
+
+        // ---------------------
+        // ESC Key Passthrough
+        // ---------------------
+        // In matlab-proxy (browser-based MATLAB), the parent frame
+        // intercepts ESC for its own UI (dismiss dialogs, menus).
+        // This prevents ESC from reaching xterm.js, which breaks TUI
+        // apps like Claude Code that rely on ESC for navigation.
+        // Capture ESC early and stop it from propagating to the parent.
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && activeTabId && tabs[activeTabId] && !tabs[activeTabId].exited) {
+                // If context menu is open, dismiss it instead of sending ESC to terminal.
+                if (contextMenuEl) {
+                    dismissContextMenu();
+                    e.stopPropagation();
+                    e.preventDefault();
+                    return;
+                }
+                e.stopPropagation();
+                e.preventDefault();
+                bufferInput(activeTabId, '\x1b');
+            }
+        }, true);  // capture phase — runs before any other handler
+
+        // ---------------------
+        // Focus Recovery
+        // ---------------------
+        // In browser-based environments (matlab-proxy), xterm.js can lose
+        // focus when TUI apps (like Claude's /mcp view) trigger rapid screen
+        // updates through the nested iframe chain.  Re-focus the active
+        // terminal on any click or when the document/window regains focus.
+        function refocusActiveTerminal() {
+            if (activeTabId && tabs[activeTabId] && !tabs[activeTabId].exited) {
+                // In nested iframes (matlab-proxy), the iframe itself must
+                // have focus before xterm's hidden textarea can receive keys.
+                try { window.focus(); } catch (e) {}
+                tabs[activeTabId].terminal.focus();
+            }
+        }
+        document.addEventListener('click', refocusActiveTerminal);
+        window.addEventListener('focus', refocusActiveTerminal);
+        document.addEventListener('focusin', refocusActiveTerminal);
+
+        // ---------------------
+        // Context Menu (Copy/Paste)
+        // ---------------------
+        var contextMenuEl = null;
+
+        function showContextMenu(x, y, id) {
+            dismissContextMenu();
+            var entry = tabs[id];
+            if (!entry) return;
+
+            var menu = document.createElement('div');
+            menu.className = 'context-menu';
+
+            var hasSelection = !!entry.terminal.getSelection();
+            var canCopy = hasSelection && !!(navigator.clipboard && navigator.clipboard.writeText);
+
+            var copyItem = document.createElement('div');
+            copyItem.className = 'context-menu-item' + (canCopy ? '' : ' disabled');
+            copyItem.innerHTML = '<span>Copy</span><span class="context-menu-shortcut">Ctrl+Shift+C</span>';
+            if (canCopy) {
+                copyItem.addEventListener('click', function () {
+                    var sel = entry.terminal.getSelection();
+                    if (sel) navigator.clipboard.writeText(sel);
+                    dismissContextMenu();
+                    entry.terminal.focus();
+                });
+            }
+
+            var pasteItem = document.createElement('div');
+            pasteItem.className = 'context-menu-item';
+            pasteItem.innerHTML = '<span>Paste</span><span class="context-menu-shortcut">Ctrl+Shift+V</span>';
+            pasteItem.addEventListener('click', function () {
+                dismissContextMenu();
+                // Route through MATLAB — CEF blocks clipboard.readText() from click events.
+                sendToMATLAB({ type: 'paste', id: id });
+                entry.terminal.focus();
+            });
+
+            menu.appendChild(copyItem);
+            menu.appendChild(pasteItem);
+            document.body.appendChild(menu);
+
+            // Keep menu within viewport
+            var rect = menu.getBoundingClientRect();
+            if (x + rect.width > window.innerWidth) x = window.innerWidth - rect.width - 4;
+            if (y + rect.height > window.innerHeight) y = window.innerHeight - rect.height - 4;
+            menu.style.left = x + 'px';
+            menu.style.top = y + 'px';
+
+            contextMenuEl = menu;
+        }
+
+        function dismissContextMenu() {
+            if (contextMenuEl) {
+                contextMenuEl.remove();
+                contextMenuEl = null;
+            }
+        }
+
+        document.addEventListener('click', dismissContextMenu);
+
+        // Use capture phase to intercept before native CEF/uihtml context menu.
+        document.addEventListener('contextmenu', function (e) {
+            if (!activeTabId || !tabs[activeTabId]) return;
+            // Only trigger within the terminal area.
+            if (!containerEl.contains(e.target)) return;
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            showContextMenu(e.clientX, e.clientY, activeTabId);
+        }, true);
 
         // ---------------------
         // Resize Handling

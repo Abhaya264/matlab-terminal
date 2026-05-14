@@ -1,4 +1,4 @@
-function v = TerminalVersion()
+function v = terminalVersion()
 %TERMINALVERSION Return the installed toolbox version.
 %
 %   The default value below is used for local development. During the

@@ -68,25 +68,25 @@
   ],
   "signatures": {
     "matlab_editor_list": {
-      "function": "TerminalMCPTools.matlab_editor_list",
+      "function": "terminaltools.matlab_editor_list",
       "input": {
         "order": []
       }
     },
     "matlab_editor_active": {
-      "function": "TerminalMCPTools.matlab_editor_active",
+      "function": "terminaltools.matlab_editor_active",
       "input": {
         "order": []
       }
     },
     "matlab_editor_selection": {
-      "function": "TerminalMCPTools.matlab_editor_selection",
+      "function": "terminaltools.matlab_editor_selection",
       "input": {
         "order": []
       }
     },
     "matlab_editor_read": {
-      "function": "TerminalMCPTools.matlab_editor_read",
+      "function": "terminaltools.matlab_editor_read",
       "input": {
         "order": ["name"]
       }

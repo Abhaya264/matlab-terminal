@@ -266,6 +266,12 @@ func TestIntegration_ShellExit(t *testing.T) {
 }
 
 func TestIntegration_CloseOneSurvivesOther(t *testing.T) {
+	// ConPTY can occasionally hang during close in CI (see #36).
+	timer := time.AfterFunc(30*time.Second, func() {
+		panic("TestIntegration_CloseOneSurvivesOther timed out after 30s")
+	})
+	defer timer.Stop()
+
 	srv, _ := startTestServer(t)
 	defer srv.Close()
 	base := srv.URL

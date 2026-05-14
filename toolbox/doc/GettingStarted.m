@@ -5,48 +5,48 @@
 %% Opening a Terminal
 % Create a docked terminal with one line:
 
-t = Terminal();
+t = terminal();
 
 %% Named Terminals
 % Give each terminal a descriptive name so you can tell them apart in
 % the MATLAB Desktop tab bar.
 
-t1 = Terminal(Name="Build");
-t2 = Terminal(Name="Git");
+t1 = terminal(Name="Build");
+t2 = terminal(Name="Git");
 
 %% Floating Windows
 % Open a terminal in its own undocked window instead of the desktop.
 
-t = Terminal(WindowStyle="normal");
+t = terminal(WindowStyle="normal");
 
 %% Custom Shell
 % By default the terminal uses your system shell ($SHELL on Unix,
 % %COMSPEC% on Windows). Override it with the Shell argument.
 
 % Linux/macOS examples:
-t = Terminal(Shell="zsh");
-t = Terminal(Shell="/bin/bash");
+t = terminal(Shell="zsh");
+t = terminal(Shell="/bin/bash");
 
 % Windows examples:
-% t = Terminal(Shell="powershell.exe");
-% t = Terminal(Shell="wsl.exe");
+% t = terminal(Shell="powershell.exe");
+% t = terminal(Shell="wsl.exe");
 
 %% Color Themes
 % Terminal follows the MATLAB Desktop theme by default. Choose a preset
 % theme or change themes on the fly.
 
-t = Terminal(Theme="dracula");
+t = terminal(Theme="dracula");
 t.Theme = "nord";                  % switch to a different theme
 
 %%
 % List all available preset themes:
 
-Terminal.themes()
+terminal.themes()
 
 %%
 % Set a persistent default theme for all new terminals:
 
-Terminal.setDefaultTheme("dracula")
+terminal.setDefaultTheme("dracula")
 
 %% AI Agent Integration (MCP)
 % Share the running MATLAB session with AI coding agents like Claude.
@@ -54,40 +54,40 @@ Terminal.setDefaultTheme("dracula")
 % shares the session, and pre-populates the registration command.
 % Press Enter in the terminal to register, then launch your agent.
 
-t = Terminal(MCP=true);
+t = terminal(MCP=true);
 
 %% Embedding in an Existing Figure
 % Pass a figure or panel as the first argument to embed a terminal
 % inside your own UI layout.
 
 fig = uifigure("Name", "My App");
-t = Terminal(fig);
+t = terminal(fig);
 
 %% Managing Running Terminals
 % List all open terminals and close them programmatically.
 
-terminals = Terminal.list();    % returns handles to all running terminals
-Terminal.closeAll();            % closes every terminal
+terminals = terminal.list();    % returns handles to all running terminals
+terminal.closeAll();            % closes every terminal
 
 %% Checking the Version
 % Display the installed toolbox version:
 
-Terminal.version()
+terminal.version()
 
 %% Updating
 % Check for a newer release on GitHub and update interactively:
 
-Terminal.update()
+terminal.update()
 
 %% Cleaning Up
 % Close a single terminal by deleting its handle. The server process
 % and figure window are cleaned up automatically.
 
-t = Terminal();
+t = terminal();
 % ... use the terminal ...
 delete(t);
 
 %% Next Steps
 %
-% * Type |help Terminal| at the command prompt for full API documentation.
+% * Type |help terminal| at the command prompt for full API documentation.
 % * Visit the project repository for source code and issue tracking.

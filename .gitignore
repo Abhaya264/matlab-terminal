@@ -21,3 +21,6 @@ package-lock.json
 
 # Test output
 test-results/
+
+# AI
+.claude/

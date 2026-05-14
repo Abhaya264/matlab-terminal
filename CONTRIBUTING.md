@@ -72,14 +72,14 @@ cd server && mkdir -p ../dist/glnxa64 && go build -o ../dist/glnxa64/matlab-term
 ```matlab
 % 2. Add toolbox to path and launch
 addpath('toolbox')
-Terminal()
+terminal()
 ```
 
 ## Project Structure
 
 ```
 toolbox/                            Toolbox source (shipped in .mltbx)
-  Terminal.m                        Main MATLAB class
+  terminal.m                        Main MATLAB class
   TerminalVersion.m                 Version string (stamped at build time)
   openTerminal.m                    Launcher for Apps tab
   doc/                              Documentation
@@ -127,7 +127,7 @@ dist/                               Build output (gitignored)
 4. Test in MATLAB:
    ```matlab
    addpath('toolbox')
-   t = Terminal();
+   t = terminal();
    % exercise your changes
    delete(t);
    ```
@@ -176,7 +176,7 @@ go test -race ./...
 ```
 
 ### End-to-end
-Currently manual — launch `Terminal()` in MATLAB and verify:
+Currently manual — launch `terminal()` in MATLAB and verify:
 - Terminal renders and accepts input
 - Multiple tabs work
 - Resize behaves correctly

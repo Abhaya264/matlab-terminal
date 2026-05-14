@@ -4,5 +4,5 @@ function openTerminal()
 %OPENTERMINAL Open a Terminal.
 %   Launches a docked terminal window. This function serves as the
 %   entry point for the MATLAB Apps tab icon.
-    Terminal();
+    terminal();
 end

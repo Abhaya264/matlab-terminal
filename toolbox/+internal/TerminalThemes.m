@@ -1,28 +1,28 @@
 % Copyright 2026 The MathWorks, Inc.
 
-classdef Themes
-    %THEMES Theme presets and utilities for Terminal.
+classdef TerminalThemes
+    %TERMINALTHEMES Theme presets and utilities for Terminal.
     %
     %   Built-in presets:
     %     "dark", "light", "dracula", "monokai", "solarized-dark",
     %     "solarized-light", "nord", "gruvbox-dark", "one-dark",
     %     "tokyo-night", "catppuccin-mocha"
     %
-    %   internal.Themes.list()           — list available preset names
-    %   internal.Themes.resolve(theme)   — resolve a theme value to a full config struct
-    %   internal.Themes.validate(theme)  — validate a theme value
+    %   internal.TerminalThemes.list()           — list available preset names
+    %   internal.TerminalThemes.resolve(theme)   — resolve a theme value to a full config struct
+    %   internal.TerminalThemes.validate(theme)  — validate a theme value
 
     methods (Static)
         function names = list()
             %LIST Return available theme names including "auto".
-            presets = internal.Themes.presets();
+            presets = internal.TerminalThemes.presets();
             names = ["auto"; string(fieldnames(presets))];
         end
 
         function validate(theme)
             %VALIDATE Error if theme is not a valid preset name or struct.
             if isstruct(theme)
-                internal.Themes.validateStruct(theme);
+                internal.TerminalThemes.validateStruct(theme);
                 return;
             end
             if ~isstring(theme) && ~ischar(theme)
@@ -31,7 +31,7 @@ classdef Themes
             end
             theme = string(theme);
             normalized = strrep(theme, '-', '_');
-            presets = internal.Themes.presets();
+            presets = internal.TerminalThemes.presets();
             validNames = ["auto"; string(fieldnames(presets))];
             normalizedNames = strrep(validNames, '-', '_');
             if ~ismember(normalized, normalizedNames)
@@ -46,10 +46,10 @@ classdef Themes
             %   Handles "auto", named presets, and custom structs.
             %   Adds font settings from MATLAB preferences and computes isDark.
 
-            [fontFamily, fontSize] = internal.Themes.resolveFont();
+            [fontFamily, fontSize] = internal.TerminalThemes.resolveFont();
 
             % --- Resolve colors ---
-            presets = internal.Themes.presets();
+            presets = internal.TerminalThemes.presets();
 
             if isstruct(theme)
                 % Custom struct: merge over dark defaults.
@@ -119,10 +119,10 @@ classdef Themes
             flds = fieldnames(theme);
             for i = 1:numel(flds)
                 f = string(flds{i});
-                if ~ismember(f, internal.Themes.VALID_FIELDS)
+                if ~ismember(f, internal.TerminalThemes.VALID_FIELDS)
                     error('Terminal:InvalidTheme', ...
                         'Unknown theme field "%s".\nValid fields: %s', ...
-                        f, strjoin(internal.Themes.VALID_FIELDS, ', '));
+                        f, strjoin(internal.TerminalThemes.VALID_FIELDS, ', '));
                 end
                 val = theme.(flds{i});
                 if ~ischar(val) && ~isstring(val)

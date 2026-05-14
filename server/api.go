@@ -28,6 +28,8 @@ type APIHandler struct {
 	outputQueue  []outputMessage
 	seq          int64
 	lastActivity time.Time
+
+	idleCounter int64 // incremented each idle-check tick; reset on API activity
 }
 
 // NewAPIHandler creates a new API handler.
@@ -50,6 +52,22 @@ func (h *APIHandler) LastActivity() time.Time {
 func (h *APIHandler) touch() {
 	h.mu.Lock()
 	h.lastActivity = time.Now()
+	h.idleCounter = 0
+	h.mu.Unlock()
+}
+
+// IncrementIdle bumps the idle counter and returns the new value.
+func (h *APIHandler) IncrementIdle() int64 {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.idleCounter++
+	return h.idleCounter
+}
+
+// ResetIdle resets the idle counter to zero.
+func (h *APIHandler) ResetIdle() {
+	h.mu.Lock()
+	h.idleCounter = 0
 	h.mu.Unlock()
 }
 

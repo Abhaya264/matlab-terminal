@@ -213,7 +213,8 @@ html, body {
     left: 0;
     right: 0;
     bottom: 0;
-    background: var(--bg-color);
+    background: #2b2b2b;
+    color: #a0a0a0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -268,4 +269,46 @@ html, body {
     font-family: var(--font-family);
     color: var(--fg-color);
     text-align: right;
+}
+
+/* Context menu */
+.context-menu {
+    position: fixed;
+    z-index: 1000;
+    background: var(--tab-bg);
+    border: 1px solid var(--tab-border);
+    border-radius: 4px;
+    padding: 4px 0;
+    min-width: 140px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    font-family: system-ui, -apple-system, sans-serif;
+    font-size: 13px;
+    color: var(--tab-fg-active);
+}
+
+.context-menu-item {
+    padding: 6px 16px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.context-menu-item:hover {
+    background: var(--tab-hover-bg);
+}
+
+.context-menu-item.disabled {
+    color: var(--tab-fg);
+    cursor: default;
+}
+
+.context-menu-item.disabled:hover {
+    background: transparent;
+}
+
+.context-menu-shortcut {
+    margin-left: 24px;
+    font-size: 11px;
+    color: var(--tab-fg);
 }
