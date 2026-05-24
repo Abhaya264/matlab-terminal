@@ -885,7 +885,11 @@
                     }
                 });
 
+                var lastSentCols = 0, lastSentRows = 0;
                 entry.terminal.onResize(function (size) {
+                    if (size.cols === lastSentCols && size.rows === lastSentRows) return;
+                    lastSentCols = size.cols;
+                    lastSentRows = size.rows;
                     transport.send({ type: 'resize', id: id, cols: size.cols, rows: size.rows });
                 });
 
@@ -924,9 +928,10 @@
 
                 function delayedFitAndResize() {
                     entry.fitAddon.fit();
-                    entry.terminal.refresh(0, entry.terminal.rows - 1);
                     var d = entry.fitAddon.proposeDimensions();
-                    if (d && d.cols > 0 && d.rows > 0) {
+                    if (d && d.cols > 0 && d.rows > 0 && (d.cols !== lastSentCols || d.rows !== lastSentRows)) {
+                        lastSentCols = d.cols;
+                        lastSentRows = d.rows;
                         transport.send({ type: 'resize', id: id, cols: d.cols, rows: d.rows });
                     }
                 }
@@ -1228,12 +1233,15 @@
             // ---------------------
             // Resize Handling
             // ---------------------
+            var resizeTimer = null;
             var resizeObserver = new ResizeObserver(function () {
-                if (activeTabId && tabs[activeTabId]) {
-                    var entry = tabs[activeTabId];
-                    entry.fitAddon.fit();
-                    entry.terminal.refresh(0, entry.terminal.rows - 1);
-                }
+                if (resizeTimer) clearTimeout(resizeTimer);
+                resizeTimer = setTimeout(function () {
+                    resizeTimer = null;
+                    if (activeTabId && tabs[activeTabId]) {
+                        tabs[activeTabId].fitAddon.fit();
+                    }
+                }, 100);
             });
             resizeObserver.observe(containerEl);
 
