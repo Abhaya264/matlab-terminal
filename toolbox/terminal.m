@@ -642,7 +642,8 @@ classdef (Sealed) terminal < handle
 
             % Create and dock the DDG component.
             component = GLUE2.DDGComponent(studio, componentId, obj);
-            component.DestroyOnHide = true;
+            component.DestroyOnHide = false;
+            component.AllowMinimize = true;
             studio.registerComponent(component);
             component.setPreferredSize(600, 400);
             studio.moveComponentToDock(component, char(panelTitle), 'Right', 'Tabbed');
