@@ -22,11 +22,12 @@ var upgrader = websocket.Upgrader{
 
 // wsMessage is a JSON control message sent over text frames.
 type wsMessage struct {
-	Type string `json:"type"`
-	ID   string `json:"id,omitempty"`
-	Cols uint16 `json:"cols,omitempty"`
-	Rows uint16 `json:"rows,omitempty"`
-	Data string `json:"data,omitempty"` // base64-encoded for output/scrollback
+	Type  string `json:"type"`
+	ID    string `json:"id,omitempty"`
+	Cols  uint16 `json:"cols,omitempty"`
+	Rows  uint16 `json:"rows,omitempty"`
+	Data  string `json:"data,omitempty"` // base64-encoded for output/scrollback
+	Shell string `json:"shell,omitempty"`
 }
 
 // HandleWebSocket upgrades to a WebSocket connection and multiplexes
@@ -109,11 +110,12 @@ func (ws *wsConn) run() {
 		ws.handler.touch()
 
 		var msg struct {
-			Type string `json:"type"`
-			ID   string `json:"id"`
-			Data string `json:"data"`
-			Cols uint16 `json:"cols"`
-			Rows uint16 `json:"rows"`
+			Type  string `json:"type"`
+			ID    string `json:"id"`
+			Data  string `json:"data"`
+			Cols  uint16 `json:"cols"`
+			Rows  uint16 `json:"rows"`
+			Shell string `json:"shell"`
 		}
 		if err := json.Unmarshal(raw, &msg); err != nil {
 			log.Printf("websocket: invalid message: %v", err)
@@ -122,7 +124,7 @@ func (ws *wsConn) run() {
 
 		switch msg.Type {
 		case "create":
-			ws.handleCreate()
+			ws.handleCreate(msg.Shell)
 		case "input":
 			ws.handleInput(msg.ID, msg.Data)
 		case "resize":
@@ -135,8 +137,8 @@ func (ws *wsConn) run() {
 	}
 }
 
-func (ws *wsConn) handleCreate() {
-	result, err := ws.handler.manager.Create("", 80, 24,
+func (ws *wsConn) handleCreate(shell string) {
+	result, err := ws.handler.manager.Create(shell, 80, 24,
 		func(sessionID string, data []byte) {
 			ws.sendJSON(wsMessage{
 				Type: "output",
