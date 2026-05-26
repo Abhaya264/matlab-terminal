@@ -584,10 +584,21 @@ classdef (Sealed) terminal < handle
             try
                 studios = DAS.Studio.getAllStudiosSortedByMostRecentlyActive;
                 if modelName ~= ""
+                    % First pass: exact match (title is "ModelName - Simulink").
+                    exactTitle = modelName + " - Simulink";
                     for i = 1:numel(studios)
-                        if startsWith(studios(i).getStudioTitle(), modelName)
+                        if studios(i).getStudioTitle() == exactTitle
                             studio = studios(i);
                             break;
+                        end
+                    end
+                    % Second pass: prefix match (most recently active).
+                    if isempty(studio)
+                        for i = 1:numel(studios)
+                            if startsWith(studios(i).getStudioTitle(), modelName)
+                                studio = studios(i);
+                                break;
+                            end
                         end
                     end
                     if isempty(studio)
