@@ -117,6 +117,7 @@
             // State
             // ---------------------
             var config = null;
+            var shellOverride = null;  // set from URL param for WebSocket mode
             var tabs = {};
             var activeTabId = null;
             var tabCounter = 0;
@@ -669,6 +670,9 @@
                         var themeParam = params.get('theme');
                         if (themeParam) standaloneTheme = JSON.parse(themeParam);
                     } catch (e) { }
+                    // Shell override for WebSocket mode (e.g. Simulink panel).
+                    var shellParam = params.get('shell');
+                    if (shellParam) shellOverride = shellParam;
                     setTimeout(function () {
                         if (transport) return;
                         connectStandalone(port, token, useTLS, standaloneTheme);
@@ -873,7 +877,9 @@
 
                 tabsEl.appendChild(tabEl);
 
-                transport.send({ type: 'create' });
+                var createMsg = { type: 'create' };
+                if (shellOverride) createMsg.shell = shellOverride;
+                transport.send(createMsg);
 
                 switchToWrapper(wrapper, tabEl);
 
