@@ -543,6 +543,12 @@
                 config = { theme: theme };
                 applyTheme(theme);
 
+                // Hide tab bar when tabs are disabled.
+                if (!theme.tabs) {
+                    var tabBar = document.getElementById('tab-bar');
+                    if (tabBar) tabBar.style.display = 'none';
+                }
+
                 var existingIds = theme.existingSessionIds;
                 var scrollbacks = theme.scrollbacks || {};
                 if (existingIds && existingIds.length > 0) {
@@ -632,6 +638,10 @@
                 var t = theme || defaultStandaloneTheme;
                 config = { theme: t };
                 applyTheme(t);
+                if (!t.tabs) {
+                    var tabBar = document.getElementById('tab-bar');
+                    if (tabBar) tabBar.style.display = 'none';
+                }
                 transport = new WebSocketTransport(port, token, useTLS);
                 transport.connect();
             }
