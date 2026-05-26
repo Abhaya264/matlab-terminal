@@ -50,6 +50,9 @@ classdef (Sealed) terminal < handle
     %     Model       - Name of the Simulink model to dock the terminal in.
     %                   Implies Place="simulink". If multiple models share a
     %                   prefix, exact match is preferred.
+    %     Tabs        - Enable multi-tab UI with tab bar and + button.
+    %                   Default: false. Set to true for multiple terminal
+    %                   sessions in a single window.
     %
     %   Static methods:
     %     terminal.version()  — return the installed toolbox version string
@@ -84,6 +87,7 @@ classdef (Sealed) terminal < handle
     %     t = terminal(Agentic=true);  % interactive wizard
     %     t = terminal(Place="simulink");          % dock in active Simulink model
     %     t = terminal(Model="MyController");      % dock in specific model
+    %     t = terminal(Tabs=true);    % enable multi-tab UI
     %     terminal.resetAgentOptions();
     %     delete(t);
     %     terminal.update();
@@ -123,6 +127,7 @@ classdef (Sealed) terminal < handle
     properties (SetAccess = private)
         Shell string        % shell program for new sessions (empty = server default)
         Place string = "matlab"  % "matlab" or "simulink"
+        Tabs logical = false  % whether multi-tab UI is enabled
     end
 
     properties
@@ -160,6 +165,7 @@ classdef (Sealed) terminal < handle
                 options.Agent (1,1) string = ""
                 options.Toolkits (1,:) string = string.empty
                 options.AgentCLI (1,1) string = ""
+                options.Tabs (1,1) logical = false
             end
 
             % --- Model implies Place="simulink" ---
@@ -169,6 +175,7 @@ classdef (Sealed) terminal < handle
 
             obj.Place = lower(options.Place);
             obj.Shell = options.Shell;
+            obj.Tabs = options.Tabs;
 
             % Use saved default theme if not explicitly provided.
             if ismissing(options.Theme)
@@ -555,6 +562,7 @@ classdef (Sealed) terminal < handle
 
             % --- Read MATLAB theme / font settings ---
             themeConfig = internal.TerminalThemes.resolve(obj.Theme);
+            themeConfig.tabs = obj.Tabs;
 
             if isprop(parent, 'AutoResizeChildren')
                 parent.AutoResizeChildren = 'off';
@@ -644,6 +652,7 @@ classdef (Sealed) terminal < handle
 
             % Build the URL served by the Go server's --static-dir.
             themeConfig = internal.TerminalThemes.resolve(obj.Theme);
+            themeConfig.tabs = obj.Tabs;
             themeJson = urlencode(jsonencode(themeConfig));
             serverUrl = sprintf('http://127.0.0.1:%d/static/index.html?port=%d&token=%s&tls=0&theme=%s&shell=%s', ...
                 obj.ServerProcess.port, obj.ServerProcess.port, obj.AuthToken, themeJson, urlencode(obj.Shell));
