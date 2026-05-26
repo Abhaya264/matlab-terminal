@@ -5,6 +5,8 @@ classdef (Sealed) terminal < handle
     %   t = terminal(Name="Build")        — docked terminal with custom name
     %   t = terminal(WindowStyle="normal") — undocked terminal in its own window
     %   t = terminal(Agent="claude")       — full agent integration with MathWorks toolkits
+    %   t = terminal(Place="simulink")    — dock terminal in Simulink editor
+    %   t = terminal(Model="MyModel")     — dock terminal in specific Simulink model
     %   t = terminal(parent)              — terminal inside an existing figure/panel
     %   delete(t)                         — closes the terminal and kills the server
     %
@@ -42,6 +44,12 @@ classdef (Sealed) terminal < handle
     %                   agent binary has a non-standard name or path.
     %                   Example: "devai launch claude" or "/usr/local/bin/my-claude"
     %                   Saved in config.json for subsequent runs.
+    %     Place       - "matlab" (default) or "simulink". When "simulink",
+    %                   docks the terminal in the Simulink editor as a panel.
+    %                   Requires a Simulink model to be open.
+    %     Model       - Name of the Simulink model to dock the terminal in.
+    %                   Implies Place="simulink". If multiple models share a
+    %                   prefix, exact match is preferred.
     %
     %   Static methods:
     %     terminal.version()  — return the installed toolbox version string
@@ -74,6 +82,8 @@ classdef (Sealed) terminal < handle
     %     t = terminal(Agent="claude", Toolkits=["matlab","simulink"]);
     %     t = terminal(Agent="claude", AgentCLI="devai launch claude");
     %     t = terminal(Agentic=true);  % interactive wizard
+    %     t = terminal(Place="simulink");          % dock in active Simulink model
+    %     t = terminal(Model="MyController");      % dock in specific model
     %     terminal.resetAgentOptions();
     %     delete(t);
     %     terminal.update();
