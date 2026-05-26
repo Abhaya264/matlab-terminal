@@ -676,6 +676,19 @@ classdef (Sealed) terminal < handle
 
             % Register this instance.
             terminal.registry('add', obj);
+
+            % Monitor sessions — close panel when all tabs exit.
+            % In Simulink mode, data flows over WebSocket (MATLAB not in path),
+            % so we need a lightweight timer to detect when all sessions end.
+            obj.ReadOpts = weboptions('HeaderFields', {'Authorization', obj.AuthToken}, ...
+                'Timeout', 2, 'ContentType', 'json');
+            obj.PollTimer = timer( ...
+                'ExecutionMode', 'fixedSpacing', ...
+                'StartDelay', 2, ...
+                'Period', 1, ...
+                'TimerFcn', @(~,~) obj.checkAllExited(), ...
+                'ErrorFcn', @(~,~) []);
+            start(obj.PollTimer);
         end
 
         function deferredInit(obj, initTimer, themeConfig)
