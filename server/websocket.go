@@ -27,6 +27,7 @@ type wsMessage struct {
 	Cols  uint16 `json:"cols,omitempty"`
 	Rows  uint16 `json:"rows,omitempty"`
 	Data  string `json:"data,omitempty"` // base64-encoded for output/scrollback
+	Meta  string `json:"meta,omitempty"` // "serialized" when Data is xterm.js state
 	Shell string `json:"shell,omitempty"`
 }
 
@@ -133,6 +134,8 @@ func (ws *wsConn) run() {
 			ws.handleClose(msg.ID)
 		case "sessions":
 			ws.handleSessions()
+		case "state":
+			ws.handler.manager.SetSerializedState(msg.ID, msg.Data)
 		}
 	}
 }
@@ -186,16 +189,26 @@ func (ws *wsConn) handleClose(id string) {
 func (ws *wsConn) handleSessions() {
 	ids := ws.handler.manager.IDs()
 	for _, id := range ids {
-		data := ws.handler.manager.Scrollback(id)
-		scrollback := ""
-		if data != nil {
-			scrollback = base64.StdEncoding.EncodeToString(data)
+		// Prefer serialized xterm.js state — reflows correctly on resize.
+		if state := ws.handler.manager.SerializedState(id); state != "" {
+			ws.sendJSON(wsMessage{
+				Type: "session",
+				ID:   id,
+				Data: state,
+				Meta: "serialized",
+			})
+		} else {
+			data := ws.handler.manager.Scrollback(id)
+			scrollback := ""
+			if data != nil {
+				scrollback = base64.StdEncoding.EncodeToString(data)
+			}
+			ws.sendJSON(wsMessage{
+				Type: "session",
+				ID:   id,
+				Data: scrollback,
+			})
 		}
-		ws.sendJSON(wsMessage{
-			Type: "session",
-			ID:   id,
-			Data: scrollback,
-		})
 	}
 	ws.sendJSON(wsMessage{Type: "sessions_done"})
 }

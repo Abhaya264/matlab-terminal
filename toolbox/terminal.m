@@ -992,7 +992,9 @@ classdef (Sealed) terminal < handle
                                 try
                                     sbUrl = sprintf('%s/api/scrollback?id=%s', obj.BaseURL, sid);
                                     sbResp = webread(sbUrl, obj.ReadOpts);
-                                    if isfield(sbResp, 'data')
+                                    if isfield(sbResp, 'serialized')
+                                        scrollbacks.(sid) = struct('serialized', sbResp.serialized);
+                                    elseif isfield(sbResp, 'data')
                                         scrollbacks.(sid) = sbResp.data;
                                     end
                                 catch
@@ -1032,6 +1034,8 @@ classdef (Sealed) terminal < handle
                     obj.serverPost('/api/resize', struct('id', msg.id, 'cols', msg.cols, 'rows', msg.rows));
                 case 'close'
                     obj.serverPost('/api/close', struct('id', msg.id));
+                case 'state'
+                    obj.serverPost('/api/state', struct('id', msg.id, 'state', msg.data));
                 case 'paste'
                     text = clipboard('paste');
                     if ~isempty(text)

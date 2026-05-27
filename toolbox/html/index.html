@@ -72,6 +72,7 @@
     </script>
     <script src="lib/xterm/xterm.js"></script>
     <script src="lib/xterm/addon-fit.js"></script>
+    <script src="lib/xterm/addon-serialize.js"></script>
     <script>
         (function () {
             'use strict';
@@ -122,6 +123,7 @@
             var activeTabId = null;
             var tabCounter = 0;
             var pendingTabs = [];
+            var STATE_SAVE_INTERVAL = 5000; // serialize buffer every 5s
 
             var tabsEl = document.getElementById('tabs');
             var addTabBtn = document.getElementById('add-tab-btn');
@@ -332,6 +334,9 @@
                     case 'close':
                         this._publish({ action: 'close', id: msg.id });
                         break;
+                    case 'state':
+                        this._publish({ action: 'state', id: msg.id, data: msg.data });
+                        break;
                 }
             };
 
@@ -418,7 +423,10 @@
                         if (this._pendingSessions.length > 0) {
                             for (var i = 0; i < this._pendingSessions.length; i++) {
                                 var s = this._pendingSessions[i];
-                                reconnectTab(s.id, s.data);
+                                var sbData = (s.meta === 'serialized')
+                                    ? { serialized: s.data }
+                                    : s.data;
+                                reconnectTab(s.id, sbData);
                             }
                         } else {
                             createTab();
@@ -874,12 +882,15 @@
                 });
 
                 var fitAddon = new FitAddon.FitAddon();
+                var serializeAddon = new SerializeAddon.SerializeAddon();
                 terminal.loadAddon(fitAddon);
+                terminal.loadAddon(serializeAddon);
                 terminal.open(wrapper);
 
                 pendingTabs.push({
                     terminal: terminal,
                     fitAddon: fitAddon,
+                    serializeAddon: serializeAddon,
                     wrapper: wrapper,
                     tab: tabEl,
                     exited: false
@@ -993,7 +1004,7 @@
                 setTimeout(delayedFitAndResize, 1500);
             }
 
-            function reconnectTab(id, scrollbackBase64) {
+            function reconnectTab(id, scrollbackData) {
                 tabCounter++;
                 var tabName = 'Terminal ' + tabCounter;
 
@@ -1017,20 +1028,38 @@
                 });
 
                 var fitAddon = new FitAddon.FitAddon();
+                var serializeAddon = new SerializeAddon.SerializeAddon();
                 terminal.loadAddon(fitAddon);
+                terminal.loadAddon(serializeAddon);
                 terminal.open(wrapper);
 
-                if (scrollbackBase64) {
-                    dbg('Replaying scrollback for ' + id + ' (' + scrollbackBase64.length + ' base64 chars)');
+                if (scrollbackData) {
                     try {
-                        var raw = atob(scrollbackBase64);
-                        var bytes = new Uint8Array(raw.length);
-                        for (var j = 0; j < raw.length; j++) {
-                            bytes[j] = raw.charCodeAt(j);
+                        // Determine if we have serialized state or raw bytes.
+                        var serialized = null;
+                        if (typeof scrollbackData === 'object' && scrollbackData.serialized) {
+                            serialized = scrollbackData.serialized;
+                        } else if (typeof scrollbackData === 'string') {
+                            serialized = null; // raw base64 — fall through
                         }
-                        terminal.write(bytes);
+
+                        if (serialized) {
+                            dbg('Restoring serialized state for ' + id + ' (' + serialized.length + ' chars)');
+                            terminal.write(serialized);
+                        } else {
+                            var raw64 = (typeof scrollbackData === 'string') ? scrollbackData : '';
+                            if (raw64) {
+                                dbg('Replaying raw scrollback for ' + id + ' (' + raw64.length + ' base64 chars)');
+                                var raw = atob(raw64);
+                                var bytes = new Uint8Array(raw.length);
+                                for (var j = 0; j < raw.length; j++) {
+                                    bytes[j] = raw.charCodeAt(j);
+                                }
+                                terminal.write(bytes);
+                            }
+                        }
                     } catch (e) {
-                        dbg('Failed to decode scrollback for ' + id + ': ' + e.message);
+                        dbg('Failed to restore scrollback for ' + id + ': ' + e.message);
                     }
                 }
 
@@ -1039,6 +1068,7 @@
                 var entry = {
                     terminal: terminal,
                     fitAddon: fitAddon,
+                    serializeAddon: serializeAddon,
                     wrapper: wrapper,
                     tab: tabEl,
                     exited: false
@@ -1292,16 +1322,41 @@
             }, true);
 
             // ---------------------
-            // Resize Handling
+            // Resize Handling (debounced)
             // ---------------------
+            var resizeTimer = null;
             var resizeObserver = new ResizeObserver(function () {
-                if (activeTabId && tabs[activeTabId]) {
-                    var entry = tabs[activeTabId];
-                    entry.fitAddon.fit();
-                    entry.terminal.refresh(0, entry.terminal.rows - 1);
-                }
+                if (resizeTimer) clearTimeout(resizeTimer);
+                resizeTimer = setTimeout(function () {
+                    resizeTimer = null;
+                    if (activeTabId && tabs[activeTabId]) {
+                        var entry = tabs[activeTabId];
+                        entry.fitAddon.fit();
+                        entry.terminal.refresh(0, entry.terminal.rows - 1);
+                    }
+                }, 150);
             });
             resizeObserver.observe(containerEl);
+
+            // ---------------------
+            // Periodic State Serialization
+            // ---------------------
+            // Serialize each terminal's buffer and send to the server.
+            // On reconnect, the serialized state reflows correctly at any width.
+            setInterval(function () {
+                for (var id in tabs) {
+                    var entry = tabs[id];
+                    if (entry.exited || !entry.serializeAddon) continue;
+                    try {
+                        var state = entry.serializeAddon.serialize();
+                        if (state) {
+                            transport.send({ type: 'state', id: id, data: state });
+                        }
+                    } catch (e) {
+                        dbg('serialize error for ' + id + ': ' + e.message);
+                    }
+                }
+            }, STATE_SAVE_INTERVAL);
 
         })();
     </script>
