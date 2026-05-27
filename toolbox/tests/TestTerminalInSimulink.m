@@ -351,12 +351,18 @@ classdef TestTerminalInSimulink < matlab.unittest.TestCase
             testCase.verifyEqual(t.Place, "matlab");
         end
 
-        function testWindowStyleIgnoredInSimulink(testCase)
-            % WindowStyle="normal" has no effect in Simulink mode — the
+        function testWindowStyleWarnsInSimulink(testCase)
+            % WindowStyle="normal" issues a warning in Simulink mode — the
             % terminal always docks via the DDG panel.
-            t = terminal(Place="simulink", WindowStyle="normal");
-            testCase.addTeardown(@() safeDelete(t));
-            testCase.verifyEqual(t.Place, "simulink");
+            testCase.verifyWarning(...
+                @() createAndCleanup(testCase, Place="simulink", WindowStyle="normal"), ...
+                'Terminal:WindowStyleIgnored');
+        end
+
+        function testWindowStyleDockedNoWarningInSimulink(testCase)
+            % WindowStyle="docked" (or default) should not warn.
+            testCase.verifyWarningFree(...
+                @() createAndCleanup(testCase, Place="simulink", WindowStyle="docked"));
         end
 
         %% --- Tabs tests ---
@@ -383,6 +389,17 @@ function safeDelete(t)
     if isvalid(t)
         delete(t);
     end
+end
+
+function createAndCleanup(testCase, nvArgs)
+    arguments
+        testCase
+        nvArgs.Place
+        nvArgs.WindowStyle
+    end
+    args = namedargs2cell(nvArgs);
+    t = terminal(args{:});
+    testCase.addTeardown(@() safeDelete(t));
 end
 
 function safeCloseSystem(modelName)

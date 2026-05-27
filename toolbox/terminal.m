@@ -173,6 +173,13 @@ classdef (Sealed) terminal < handle
                 options.Place = "simulink";
             end
 
+            % Warn if WindowStyle is explicitly set in Simulink mode.
+            if options.Place == "simulink" && options.WindowStyle ~= "docked"
+                warning('Terminal:WindowStyleIgnored', ...
+                    'WindowStyle="%s" is not supported when Place="simulink". The terminal will dock in the Simulink editor.', ...
+                    options.WindowStyle);
+            end
+
             obj.Place = lower(options.Place);
             obj.Shell = options.Shell;
             obj.Tabs = options.Tabs;
