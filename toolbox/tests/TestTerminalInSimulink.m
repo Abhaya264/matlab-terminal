@@ -358,6 +358,22 @@ classdef TestTerminalInSimulink < matlab.unittest.TestCase
             testCase.addTeardown(@() safeDelete(t));
             testCase.verifyEqual(t.Place, "simulink");
         end
+
+        %% --- Tabs tests ---
+
+        function testTabsTrueInSimulink(testCase)
+            t = terminal(Place="simulink", Tabs=true);
+            testCase.addTeardown(@() safeDelete(t));
+            testCase.verifyTrue(t.Tabs);
+            testCase.verifyEqual(t.Place, "simulink");
+        end
+
+        function testTabsTrueWithModel(testCase)
+            t = terminal(Model=testCase.ModelName, Tabs=true);
+            testCase.addTeardown(@() safeDelete(t));
+            testCase.verifyTrue(t.Tabs);
+            testCase.verifyEqual(t.Place, "simulink");
+        end
     end
 end
 
