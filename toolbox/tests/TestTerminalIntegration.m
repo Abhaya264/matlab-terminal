@@ -218,6 +218,34 @@ classdef TestTerminalIntegration < matlab.unittest.TestCase
             testCase.addTeardown(@() safeDelete(t));
             testCase.verifyEqual(t.Theme, "dracula");
         end
+
+        %% --- Tabs tests ---
+
+        function testTabsDefaultFalse(testCase)
+            t = terminal(WindowStyle="normal");
+            testCase.addTeardown(@() safeDelete(t));
+            testCase.verifyFalse(t.Tabs);
+        end
+
+        function testTabsTrue(testCase)
+            t = terminal(WindowStyle="normal", Tabs=true);
+            testCase.addTeardown(@() safeDelete(t));
+            testCase.verifyTrue(t.Tabs);
+        end
+
+        function testTabsTrueWithAllOptions(testCase)
+            if ispc
+                shell = "cmd.exe";
+            else
+                shell = "/bin/bash";
+            end
+            t = terminal(Name="Tabbed", WindowStyle="normal", ...
+                Shell=shell, Theme="monokai", Tabs=true);
+            testCase.addTeardown(@() safeDelete(t));
+            testCase.verifyTrue(t.Tabs);
+            testCase.verifyEqual(t.Theme, "monokai");
+            testCase.verifyEqual(t.Shell, shell);
+        end
     end
 end
 

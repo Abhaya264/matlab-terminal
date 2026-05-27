@@ -180,6 +180,200 @@ classdef TestTerminalInSimulink < matlab.unittest.TestCase
             open_system(testCase.ModelName);
             pause(0.5);
         end
+
+        %% --- Multi-model tests ---
+
+        function testTargetSpecificModelAmongMultiple(testCase)
+            % With two models open, targeting one by name should succeed
+            % and not invalidate a terminal docked to the other.
+            otherModel = sprintf('terminal_test_%08x', randi(2^32 - 1));
+            new_system(otherModel);
+            open_system(otherModel);
+            pause(1);
+            testCase.addTeardown(@() safeCloseSystem(otherModel));
+
+            t1 = terminal(Model=testCase.ModelName);
+            testCase.addTeardown(@() safeDelete(t1));
+            t2 = terminal(Model=otherModel);
+            testCase.addTeardown(@() safeDelete(t2));
+
+            % Both terminals should coexist since they target different models.
+            testCase.verifyTrue(isvalid(t1));
+            testCase.verifyTrue(isvalid(t2));
+        end
+
+        function testModelWithSamePrefix(testCase)
+            % A model whose name is a prefix of another should match
+            % exactly — both should get their own terminal without conflict.
+            longerModel = testCase.ModelName + "_extended";
+            new_system(longerModel);
+            open_system(longerModel);
+            pause(1);
+            testCase.addTeardown(@() safeCloseSystem(longerModel));
+
+            t1 = terminal(Model=testCase.ModelName);
+            testCase.addTeardown(@() safeDelete(t1));
+            t2 = terminal(Model=longerModel);
+            testCase.addTeardown(@() safeDelete(t2));
+
+            % Both should coexist — prefix model should not steal the
+            % longer-named model's terminal or vice versa.
+            testCase.verifyTrue(isvalid(t1));
+            testCase.verifyTrue(isvalid(t2));
+        end
+
+        function testModelTargetsLongerNameNotPrefix(testCase)
+            % Requesting the longer-named model should succeed even when
+            % a shorter prefix model is also open. Both should coexist.
+            longerModel = testCase.ModelName + "_v2";
+            new_system(longerModel);
+            open_system(longerModel);
+            pause(1);
+            testCase.addTeardown(@() safeCloseSystem(longerModel));
+
+            t1 = terminal(Model=testCase.ModelName);
+            testCase.addTeardown(@() safeDelete(t1));
+            t2 = terminal(Model=longerModel);
+            testCase.addTeardown(@() safeDelete(t2));
+
+            testCase.verifyTrue(isvalid(t1));
+            testCase.verifyTrue(isvalid(t2));
+        end
+
+        %% --- Lifecycle edge cases ---
+
+        function testDeleteTwiceDoesNotError(testCase)
+            t = terminal(Place="simulink");
+            delete(t);
+            testCase.verifyWarningFree(@() delete(t));
+        end
+
+        function testPlaceSimulinkDocksToMostRecentModel(testCase)
+            % Without Model=, Place="simulink" should dock to the most
+            % recently active model rather than an arbitrary one.
+            otherModel = sprintf('terminal_test_%08x', randi(2^32 - 1));
+            new_system(otherModel);
+            open_system(otherModel);
+            pause(1);
+            testCase.addTeardown(@() safeCloseSystem(otherModel));
+
+            % otherModel was opened last so it should be most recent.
+            % A terminal targeting testCase.ModelName should coexist with
+            % one created via Place="simulink" (which targets otherModel).
+            t1 = terminal(Model=testCase.ModelName);
+            testCase.addTeardown(@() safeDelete(t1));
+            t2 = terminal(Place="simulink");
+            testCase.addTeardown(@() safeDelete(t2));
+
+            % If Place="simulink" targeted testCase.ModelName (not the most
+            % recent), t1 would be invalidated by the replacement logic.
+            testCase.verifyTrue(isvalid(t1));
+            testCase.verifyTrue(isvalid(t2));
+        end
+
+        function testListCountsTerminalsAcrossModels(testCase)
+            % terminal.list() should include terminals docked to
+            % different Simulink models.
+            otherModel = sprintf('terminal_test_%08x', randi(2^32 - 1));
+            new_system(otherModel);
+            open_system(otherModel);
+            pause(1);
+            testCase.addTeardown(@() safeCloseSystem(otherModel));
+
+            before = numel(terminal.list());
+            t1 = terminal(Model=testCase.ModelName);
+            testCase.addTeardown(@() safeDelete(t1));
+            t2 = terminal(Model=otherModel);
+            testCase.addTeardown(@() safeDelete(t2));
+
+            testCase.verifyEqual(numel(terminal.list()), before + 2);
+        end
+
+        function testCloseAllAcrossMultipleModels(testCase)
+            % terminal.closeAll() should clean up terminals docked to
+            % different models.
+            otherModel = sprintf('terminal_test_%08x', randi(2^32 - 1));
+            new_system(otherModel);
+            open_system(otherModel);
+            pause(1);
+            testCase.addTeardown(@() safeCloseSystem(otherModel));
+
+            terminal(Model=testCase.ModelName);
+            terminal(Model=otherModel);
+
+            testCase.verifyGreaterThanOrEqual(numel(terminal.list()), 2);
+            terminal.closeAll();
+            pause(0.5);
+            testCase.verifyEmpty(terminal.list());
+        end
+
+        function testClosingModelInvalidatesTerminal(testCase)
+            % Closing the host model should clean up the docked terminal.
+            otherModel = sprintf('terminal_test_%08x', randi(2^32 - 1));
+            new_system(otherModel);
+            open_system(otherModel);
+            pause(1);
+
+            t = terminal(Model=otherModel);
+            testCase.verifyTrue(isvalid(t));
+
+            close_system(otherModel, 0);
+            pause(1);
+
+            testCase.verifyFalse(isvalid(t));
+        end
+
+        function testPlaceSimulinkAfterClosingMostRecentModel(testCase)
+            % If model A is opened, then model B, then B is closed,
+            % Place="simulink" should dock to A (B should not linger as
+            % most recently active).
+            otherModel = sprintf('terminal_test_%08x', randi(2^32 - 1));
+            new_system(otherModel);
+            open_system(otherModel);
+            pause(1);
+
+            % otherModel is now most recently active. Close it.
+            close_system(otherModel, 0);
+            pause(1);
+
+            % testCase.ModelName should now be the only open model.
+            t = terminal(Place="simulink");
+            testCase.addTeardown(@() safeDelete(t));
+            testCase.verifyTrue(isvalid(t));
+        end
+
+        %% --- Edge cases ---
+
+        function testEmptyModelStringStaysInMatlab(testCase)
+            % Model="" should not trigger Simulink mode.
+            t = terminal(Model="", WindowStyle="normal");
+            testCase.addTeardown(@() safeDelete(t));
+            testCase.verifyEqual(t.Place, "matlab");
+        end
+
+        function testWindowStyleIgnoredInSimulink(testCase)
+            % WindowStyle="normal" has no effect in Simulink mode — the
+            % terminal always docks via the DDG panel.
+            t = terminal(Place="simulink", WindowStyle="normal");
+            testCase.addTeardown(@() safeDelete(t));
+            testCase.verifyEqual(t.Place, "simulink");
+        end
+
+        %% --- Tabs tests ---
+
+        function testTabsTrueInSimulink(testCase)
+            t = terminal(Place="simulink", Tabs=true);
+            testCase.addTeardown(@() safeDelete(t));
+            testCase.verifyTrue(t.Tabs);
+            testCase.verifyEqual(t.Place, "simulink");
+        end
+
+        function testTabsTrueWithModel(testCase)
+            t = terminal(Model=testCase.ModelName, Tabs=true);
+            testCase.addTeardown(@() safeDelete(t));
+            testCase.verifyTrue(t.Tabs);
+            testCase.verifyEqual(t.Place, "simulink");
+        end
     end
 end
 
@@ -188,5 +382,16 @@ end
 function safeDelete(t)
     if isvalid(t)
         delete(t);
+    end
+end
+
+function safeCloseSystem(modelName)
+    try
+        close_system(modelName, 0);
+    catch
+    end
+    mdlFile = [char(modelName) '.slx'];
+    if isfile(mdlFile)
+        delete(mdlFile);
     end
 end
