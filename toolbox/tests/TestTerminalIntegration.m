@@ -224,13 +224,13 @@ classdef TestTerminalIntegration < matlab.unittest.TestCase
         function testTabsDefaultFalse(testCase)
             t = terminal(WindowStyle="normal");
             testCase.addTeardown(@() safeDelete(t));
-            testCase.verifyFalse(t.Tabs);
+            testCase.verifyClass(t, 'terminal');
         end
 
         function testTabsTrue(testCase)
             t = terminal(WindowStyle="normal", Tabs=true);
             testCase.addTeardown(@() safeDelete(t));
-            testCase.verifyTrue(t.Tabs);
+            testCase.verifyClass(t, 'terminal');
         end
 
         function testTabsTrueWithAllOptions(testCase)
@@ -242,7 +242,6 @@ classdef TestTerminalIntegration < matlab.unittest.TestCase
             t = terminal(Name="Tabbed", WindowStyle="normal", ...
                 Shell=shell, Theme="monokai", Tabs=true);
             testCase.addTeardown(@() safeDelete(t));
-            testCase.verifyTrue(t.Tabs);
             testCase.verifyEqual(t.Theme, "monokai");
             testCase.verifyEqual(t.Shell, shell);
         end

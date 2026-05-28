@@ -7,7 +7,6 @@ classdef (Sealed) terminal < handle
     %   t = terminal(Agent="claude")       — full agent integration with MathWorks toolkits
     %   t = terminal(Place="simulink")    — dock terminal in Simulink editor
     %   t = terminal(Model="MyModel")     — dock terminal in specific Simulink model
-    %   t = terminal(parent)              — terminal inside an existing figure/panel
     %   delete(t)                         — closes the terminal and kills the server
     %
     %   Name-Value Arguments:
@@ -122,12 +121,12 @@ classdef (Sealed) terminal < handle
         DDGComponent           % GLUE2.DDGComponent handle (Simulink mode only)
         DDGStudio              % DAS.Studio handle (Simulink mode only)
         SimulinkURL string = ""  % URL for DDG webbrowser widget
+        Tabs logical = false  % whether multi-tab UI is enabled
     end
 
     properties (SetAccess = private)
         Shell string        % shell program for new sessions (empty = server default)
         Place string = "matlab"  % "matlab" or "simulink"
-        Tabs logical = false  % whether multi-tab UI is enabled
     end
 
     properties
