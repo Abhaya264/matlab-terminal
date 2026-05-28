@@ -142,7 +142,7 @@ classdef (Sealed) terminal < handle
         GITHUB_REPO = 'prabhakk-mw/matlab-terminal'
         MCP_SERVER_BINARY = 'matlab-mcp-core-server'
         MCP_SERVER_REPO = 'matlab/matlab-mcp-core-server'
-        MCP_MIN_SERVER_VERSION = '0.9.1'
+        MCP_MIN_SERVER_VERSION = '0.10.0'
         % Agentic Toolkit constants
         AGENTIC_MATLAB_REPO = 'matlab/matlab-agentic-toolkit'
         AGENTIC_SIMULINK_REPO = 'matlab/simulink-agentic-toolkit'
@@ -214,6 +214,14 @@ classdef (Sealed) terminal < handle
                 end
 
                 % Always: share the MATLAB session.
+                % If shareMATLABSession is missing (toolbox uninstalled or new
+                % MATLAB release), attempt to reinstall it.
+                if isempty(which('shareMATLABSession'))
+                    if ~exist('serverBin', 'var')
+                        serverBin = terminal.ensureMCPServerBinary(config);
+                    end
+                    terminal.runSetupMatlabIfNeeded(serverBin);
+                end
                 try
                     shareMATLABSession();
                 catch me
@@ -286,8 +294,8 @@ classdef (Sealed) terminal < handle
                         terminal.initializeSimulinkToolkit(toolkitPaths.simulink);
                     end
 
-                    % Build merged extension file and register with agent.
-                    extensionFile = terminal.mergeExtensionFiles(requestedToolkits, toolkitPaths);
+                    % Collect extension files and register with agent.
+                    extensionFiles = terminal.collectExtensionFiles(requestedToolkits, toolkitPaths);
                     terminal.mergeMarketplace(toolkitPaths);
 
                     if options.AgentCLI ~= "" && requestedAgent ~= "claude"
@@ -298,7 +306,7 @@ classdef (Sealed) terminal < handle
                     agentCLI = terminal.resolveAgentCLI( ...
                         requestedAgent, options.AgentCLI, config);
                     obj.MCPCommand = terminal.buildAgentRegistration( ...
-                        requestedAgent, serverBin, extensionFile, toolkitPaths, agentCLI);
+                        requestedAgent, serverBin, extensionFiles, toolkitPaths, agentCLI);
 
                     % Persist state to config.json.
                     config.agent = char(requestedAgent);
@@ -2428,61 +2436,32 @@ classdef (Sealed) terminal < handle
             end
         end
 
-        function mergedFile = mergeExtensionFiles(toolkits, toolkitPaths)
-            %MERGEEXTENSIONFILES Merge Terminal editor tools with toolkit tools.
-            %   Returns path to a merged JSON file for --extension-file.
-            %   Uses cell arrays to avoid struct field mismatch when tools
-            %   have different fields (e.g., annotations present vs absent).
+        function files = collectExtensionFiles(toolkits, toolkitPaths)
+            %COLLECTEXTENSIONFILES Collect extension file paths for --extension-file.
+            %   Returns a cell array of paths. The MCP server v0.10.0+
+            %   supports multiple --extension-file flags natively.
 
-            % Start with Terminal's editor tools.
+            files = {};
+
+            % Terminal's editor tools.
             editorToolsFile = fullfile( ...
                 fileparts(which('terminaltools.matlab_editor_list')), ...
                 'matlab-editor-tools.json');
-            merged = jsondecode(fileread(editorToolsFile));
-
-            % Convert tools from struct array to cell array so tools
-            % with different fields can coexist.
-            if isstruct(merged.tools) && numel(merged.tools) > 1
-                merged.tools = num2cell(merged.tools);
-            elseif isstruct(merged.tools)
-                merged.tools = {merged.tools};
+            if isfile(editorToolsFile)
+                files{end+1} = editorToolsFile;
             end
 
-            % Add Simulink tools if selected.
+            % Simulink tools if selected.
             toolkits = string(toolkits);
             if ismember("simulink", toolkits) && isfield(toolkitPaths, 'simulink')
                 simToolsFile = fullfile(toolkitPaths.simulink, 'tools', 'tools.json');
                 if isfile(simToolsFile)
-                    simTools = jsondecode(fileread(simToolsFile));
-                    if isfield(simTools, 'tools')
-                        if isstruct(simTools.tools)
-                            simToolsCells = num2cell(simTools.tools);
-                        else
-                            simToolsCells = simTools.tools;
-                        end
-                        merged.tools = [merged.tools; simToolsCells];
-                    end
-                    if isfield(simTools, 'signatures')
-                        sigFields = fieldnames(simTools.signatures);
-                        for i = 1:numel(sigFields)
-                            merged.signatures.(sigFields{i}) = simTools.signatures.(sigFields{i});
-                        end
-                    end
+                    files{end+1} = simToolsFile;
                 else
                     warning('Terminal:SimulinkToolsMissing', ...
                         'Simulink tools.json not found at:\n  %s', simToolsFile);
                 end
             end
-
-            % Write merged file to install root.
-            installRoot = terminal.agenticInstallRoot();
-            if ~isfolder(installRoot)
-                mkdir(installRoot);
-            end
-            mergedFile = fullfile(installRoot, 'merged-tools.json');
-            fid = fopen(mergedFile, 'w');
-            fwrite(fid, jsonencode(merged, 'PrettyPrint', true));
-            fclose(fid);
         end
 
         function mergeMarketplace(toolkitPaths)
@@ -2553,7 +2532,7 @@ classdef (Sealed) terminal < handle
             end
         end
 
-        function cmd = buildAgentRegistration(agent, serverBin, extensionFile, toolkitPaths, agentCLI)
+        function cmd = buildAgentRegistration(agent, serverBin, extensionFiles, toolkitPaths, agentCLI)
             %BUILDAGENTREGISTRATION Register the MCP server with the chosen agent.
             %   For CLI agents (codex): returns a shell command to pre-populate.
             %   For all others: writes config directly, returns empty.
@@ -2562,10 +2541,10 @@ classdef (Sealed) terminal < handle
             if nargin < 5, agentCLI = ""; end
 
             % Common server args for all agents.
-            serverArgs = { ...
-                '--matlab-session-mode=existing', ...
-                sprintf('--extension-file=%s', extensionFile) ...
-            };
+            serverArgs = {};
+            for i = 1:numel(extensionFiles)
+                serverArgs{end+1} = sprintf('--extension-file=%s', extensionFiles{i}); %#ok<AGROW>
+            end
 
             cmd = "";
             switch agent
