@@ -105,9 +105,9 @@ jobs:
             installedToolbox = matlab.addons.toolbox.installToolbox(toolbox_path);
             
             try
-                disp('Instantiating Terminal object...');
-                t = Terminal();
-                assert(isa(t, 'Terminal'), 'Failed to create Terminal object.');
+                disp('Instantiating terminal object...');
+                t = terminal();
+                assert(isa(t, 'terminal'), 'Failed to create terminal object.');
                 disp('Test PASSED.');
                 t.delete();
             catch ME
