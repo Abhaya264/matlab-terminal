@@ -953,12 +953,8 @@
                             } catch (err) { }
                             return false;
                         }
-                        if (e.key === 'V' && navigator.clipboard) {
-                            try {
-                                navigator.clipboard.readText().then(function (text) {
-                                    if (text && !entry.exited) transport.bufferInput(id, text);
-                                });
-                            } catch (err) { }
+                        if (e.key === 'V') {
+                            pasteFromClipboard(entry, id);
                             return false;
                         }
                     }
@@ -976,6 +972,12 @@
                         }
                     }
                     return true;
+                });
+
+                entry.terminal.textarea.addEventListener('paste', function (e) {
+                    e.preventDefault();
+                    var text = (e.clipboardData || window.clipboardData).getData('text');
+                    if (text && !entry.exited) transport.bufferInput(id, text);
                 });
 
                 void entry.wrapper.offsetHeight;
@@ -1109,12 +1111,8 @@
                             } catch (err) { }
                             return false;
                         }
-                        if (e.key === 'V' && navigator.clipboard) {
-                            try {
-                                navigator.clipboard.readText().then(function (text) {
-                                    if (text && !entry.exited) transport.bufferInput(id, text);
-                                });
-                            } catch (err) { }
+                        if (e.key === 'V') {
+                            pasteFromClipboard(entry, id);
                             return false;
                         }
                     }
@@ -1132,6 +1130,12 @@
                         }
                     }
                     return true;
+                });
+
+                terminal.textarea.addEventListener('paste', function (e) {
+                    e.preventDefault();
+                    var text = (e.clipboardData || window.clipboardData).getData('text');
+                    if (text && !entry.exited) transport.bufferInput(id, text);
                 });
 
                 switchToWrapper(wrapper, tabEl);
@@ -1251,6 +1255,22 @@
             document.addEventListener('focusin', refocusActiveTerminal);
 
             // ---------------------
+            // Paste helper — uses the Clipboard API (browser-side) with
+            // fallback to the MATLAB-side clipboard('paste') transport message.
+            // ---------------------
+            function pasteFromClipboard(entry, id) {
+                if (navigator.clipboard && navigator.clipboard.readText) {
+                    navigator.clipboard.readText().then(function (text) {
+                        if (text && !entry.exited) transport.bufferInput(id, text);
+                    }).catch(function () {
+                        if (transport) transport.send({ type: 'paste', id: id });
+                    });
+                } else {
+                    if (transport) transport.send({ type: 'paste', id: id });
+                }
+            }
+
+            // ---------------------
             // Context Menu (uihtml mode only — DDG has its own)
             // ---------------------
             var contextMenuEl = null;
@@ -1283,7 +1303,7 @@
                 pasteItem.innerHTML = '<span>Paste</span><span class="context-menu-shortcut">Ctrl+Shift+V</span>';
                 pasteItem.addEventListener('click', function () {
                     dismissContextMenu();
-                    if (transport) transport.send({ type: 'paste', id: id });
+                    pasteFromClipboard(entry, id);
                     entry.terminal.focus();
                 });
 
