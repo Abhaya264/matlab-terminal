@@ -953,10 +953,6 @@
                             } catch (err) { }
                             return false;
                         }
-                        if (e.key === 'V') {
-                            pasteFromClipboard(entry, id);
-                            return false;
-                        }
                     }
                     // Caps Lock correction for CEF
                     if (capsLockOn && e.key.length === 1
@@ -972,12 +968,6 @@
                         }
                     }
                     return true;
-                });
-
-                entry.terminal.textarea.addEventListener('paste', function (e) {
-                    e.preventDefault();
-                    var text = (e.clipboardData || window.clipboardData).getData('text');
-                    if (text && !entry.exited) transport.bufferInput(id, text);
                 });
 
                 void entry.wrapper.offsetHeight;
@@ -1111,10 +1101,6 @@
                             } catch (err) { }
                             return false;
                         }
-                        if (e.key === 'V') {
-                            pasteFromClipboard(entry, id);
-                            return false;
-                        }
                     }
                     // Caps Lock correction for CEF
                     if (capsLockOn && e.key.length === 1
@@ -1130,12 +1116,6 @@
                         }
                     }
                     return true;
-                });
-
-                terminal.textarea.addEventListener('paste', function (e) {
-                    e.preventDefault();
-                    var text = (e.clipboardData || window.clipboardData).getData('text');
-                    if (text && !entry.exited) transport.bufferInput(id, text);
                 });
 
                 switchToWrapper(wrapper, tabEl);
