@@ -17,6 +17,7 @@ files = {
     'html/lib/xterm/xterm.js'
     'html/lib/xterm/xterm.css'
     'html/lib/xterm/addon-fit.js'
+    'html/lib/xterm/addon-serialize.js'
 };
 
 % Add server binaries for all available platforms.

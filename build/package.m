@@ -75,7 +75,7 @@ function package(toolboxVersion)
         'and docked or floating windows.'];
     opts.AuthorName = 'The MathWorks, Inc.';
     opts.AuthorEmail = 'support@mathworks.com';
-    opts.MinimumMatlabRelease = '';  % TBD — see README for feature constraints
+    opts.MinimumMatlabRelease = 'R2024b';
     opts.MaximumMatlabRelease = '';
     opts.ToolboxMatlabPath = toolboxDir;
     opts.ToolboxImageFile = fullfile(toolboxDir, 'images', 'matlab-terminal.jpeg');

@@ -16,9 +16,10 @@ type Session struct {
 	ID  string
 	pty ptyProcess
 
-	mu         sync.Mutex
-	closed     bool
-	scrollback []byte // ring buffer of recent output
+	mu              sync.Mutex
+	closed          bool
+	scrollback      []byte // ring buffer of recent output
+	serializedState string // xterm.js serialized buffer state (escape-code encoded)
 }
 
 // OutputCallback is called when there is output from a session.
@@ -201,6 +202,29 @@ func (s *Session) appendScrollback(data []byte) {
 		// Keep only the tail.
 		s.scrollback = s.scrollback[len(s.scrollback)-scrollbackCap:]
 	}
+}
+
+// SerializedState returns the xterm.js serialized buffer state for a session.
+func (m *SessionManager) SerializedState(id string) string {
+	sess := m.get(id)
+	if sess == nil {
+		return ""
+	}
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
+	return sess.serializedState
+}
+
+// SetSerializedState stores the xterm.js serialized buffer state for a session.
+func (m *SessionManager) SetSerializedState(id, state string) error {
+	sess := m.get(id)
+	if sess == nil {
+		return fmt.Errorf("session %s not found", id)
+	}
+	sess.mu.Lock()
+	defer sess.mu.Unlock()
+	sess.serializedState = state
+	return nil
 }
 
 func (m *SessionManager) get(id string) *Session {

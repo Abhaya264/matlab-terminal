@@ -48,13 +48,24 @@ terminal.themes()
 
 terminal.setDefaultTheme("dracula")
 
-%% AI Agent Integration (MCP)
-% Share the running MATLAB session with AI coding agents like Claude.
-% Terminal ensures the required toolkit and server binary are available,
-% shares the session, and pre-populates the registration command.
-% Press Enter in the terminal to register, then launch your agent.
+%% AI Agent Integration
+% Set up full agent integration with MathWorks Agentic Toolkits.
+% Terminal downloads the MCP server, shares the MATLAB session,
+% and registers with your AI coding agent (Claude, Copilot, Codex, etc.).
 
-t = terminal(MCP=true);
+% Interactive wizard (first run)
+t = terminal(Agentic=true);
+
+%%
+% Or skip the wizard by specifying your agent directly:
+
+t = terminal(Agent="claude");
+t = terminal(Agent="claude", Toolkits=["matlab","simulink"]);
+
+%%
+% If your agent CLI has a non-standard path:
+
+t = terminal(Agent="claude", AgentCLI="devai launch claude");
 
 %% Embedding in an Existing Figure
 % Pass a figure or panel as the first argument to embed a terminal

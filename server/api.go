@@ -273,6 +273,8 @@ func (h *APIHandler) HandleSessions(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleScrollback returns the scrollback buffer for a session.
+// Prefers serialized xterm.js state if available (proper reflow on resize).
+// Falls back to raw scrollback bytes for backward compatibility.
 func (h *APIHandler) HandleScrollback(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -286,6 +288,16 @@ func (h *APIHandler) HandleScrollback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing id parameter", http.StatusBadRequest)
 		return
 	}
+
+	// Prefer serialized state — it reflows correctly on resize.
+	if state := h.manager.SerializedState(id); state != "" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"serialized": state,
+		})
+		return
+	}
+
 	data := h.manager.Scrollback(id)
 	if data == nil {
 		http.Error(w, "session not found", http.StatusNotFound)
@@ -295,6 +307,35 @@ func (h *APIHandler) HandleScrollback(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{
 		"data": base64.StdEncoding.EncodeToString(data),
 	})
+}
+
+// HandleState stores or retrieves xterm.js serialized buffer state.
+func (h *APIHandler) HandleState(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !h.checkAuth(w, r) {
+		return
+	}
+	var req struct {
+		ID    string `json:"id"`
+		State string `json:"state"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	if req.ID == "" || req.State == "" {
+		http.Error(w, "missing id or state", http.StatusBadRequest)
+		return
+	}
+	if err := h.manager.SetSerializedState(req.ID, req.State); err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 func (h *APIHandler) getMessagesSince(since int64) []outputMessage {

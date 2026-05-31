@@ -40,6 +40,7 @@ classdef TestTerminalIntegration < matlab.unittest.TestCase
             testCase.addTeardown(@() safeDelete(t));
             testCase.Terminals(end+1) = t;
             testCase.verifyClass(t, 'terminal');
+            testCase.verifyEqual(t.Place, "matlab");
         end
 
         function testConstructorWithName(testCase)
@@ -216,6 +217,33 @@ classdef TestTerminalIntegration < matlab.unittest.TestCase
             t = terminal(Theme="dracula", WindowStyle="normal");
             testCase.addTeardown(@() safeDelete(t));
             testCase.verifyEqual(t.Theme, "dracula");
+        end
+
+        %% --- Tabs tests ---
+
+        function testTabsDefaultFalse(testCase)
+            t = terminal(WindowStyle="normal");
+            testCase.addTeardown(@() safeDelete(t));
+            testCase.verifyClass(t, 'terminal');
+        end
+
+        function testTabsTrue(testCase)
+            t = terminal(WindowStyle="normal", Tabs=true);
+            testCase.addTeardown(@() safeDelete(t));
+            testCase.verifyClass(t, 'terminal');
+        end
+
+        function testTabsTrueWithAllOptions(testCase)
+            if ispc
+                shell = "cmd.exe";
+            else
+                shell = "/bin/bash";
+            end
+            t = terminal(Name="Tabbed", WindowStyle="normal", ...
+                Shell=shell, Theme="monokai", Tabs=true);
+            testCase.addTeardown(@() safeDelete(t));
+            testCase.verifyEqual(t.Theme, "monokai");
+            testCase.verifyEqual(t.Shell, shell);
         end
     end
 end
