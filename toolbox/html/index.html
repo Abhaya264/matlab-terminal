@@ -1319,10 +1319,8 @@
 
             document.addEventListener('click', dismissContextMenu);
 
-            // Only show custom context menu in uihtml mode (UIHTMLTransport).
-            // In DDG/WebSocket mode, the framework provides its own context menu.
             document.addEventListener('contextmenu', function (e) {
-                if (!transport || !(transport instanceof UIHTMLTransport)) return;
+                if (!transport) return;
                 if (!activeTabId || !tabs[activeTabId]) return;
                 if (!containerEl.contains(e.target)) return;
                 e.preventDefault();
