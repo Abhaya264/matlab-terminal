@@ -1235,12 +1235,32 @@
             document.addEventListener('focusin', refocusActiveTerminal);
 
             function pasteFromClipboard(entry, id) {
-                if (transport instanceof UIHTMLTransport) {
-                    transport.send({ type: 'paste', id: id });
-                } else if (navigator.clipboard && navigator.clipboard.readText) {
+                if (!navigator.clipboard || !navigator.clipboard.readText) {
+                    if (transport) transport.send({ type: 'paste', id: id });
+                    return;
+                }
+                var handled = false;
+                var timer = setTimeout(function () {
+                    if (!handled) { handled = true; transport.send({ type: 'paste', id: id }); }
+                }, 500);
+                try {
                     navigator.clipboard.readText().then(function (text) {
-                        if (text && !entry.exited) transport.bufferInput(id, text);
-                    }).catch(function () {});
+                        if (handled) return;
+                        handled = true;
+                        clearTimeout(timer);
+                        if (text && !entry.exited) {
+                            transport.bufferInput(id, text);
+                        } else {
+                            transport.send({ type: 'paste', id: id });
+                        }
+                    }).catch(function () {
+                        if (handled) return;
+                        handled = true;
+                        clearTimeout(timer);
+                        transport.send({ type: 'paste', id: id });
+                    });
+                } catch (err) {
+                    if (!handled) { handled = true; clearTimeout(timer); transport.send({ type: 'paste', id: id }); }
                 }
             }
 
