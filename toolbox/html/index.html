@@ -970,6 +970,14 @@
                     return true;
                 });
 
+                if (!(transport instanceof UIHTMLTransport)) {
+                    entry.terminal.textarea.addEventListener('paste', function (e) {
+                        e.preventDefault();
+                        var text = (e.clipboardData || window.clipboardData).getData('text');
+                        if (text && !entry.exited) transport.bufferInput(id, text);
+                    });
+                }
+
                 void entry.wrapper.offsetHeight;
                 entry.fitAddon.fit();
 
@@ -1117,6 +1125,14 @@
                     }
                     return true;
                 });
+
+                if (!(transport instanceof UIHTMLTransport)) {
+                    terminal.textarea.addEventListener('paste', function (e) {
+                        e.preventDefault();
+                        var text = (e.clipboardData || window.clipboardData).getData('text');
+                        if (text && !entry.exited) transport.bufferInput(id, text);
+                    });
+                }
 
                 switchToWrapper(wrapper, tabEl);
 
