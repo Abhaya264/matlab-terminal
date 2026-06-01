@@ -970,14 +970,6 @@
                     return true;
                 });
 
-                if (!(transport instanceof UIHTMLTransport)) {
-                    entry.terminal.textarea.addEventListener('paste', function (e) {
-                        e.preventDefault();
-                        var text = (e.clipboardData || window.clipboardData).getData('text');
-                        if (text && !entry.exited) transport.bufferInput(id, text);
-                    });
-                }
-
                 void entry.wrapper.offsetHeight;
                 entry.fitAddon.fit();
 
@@ -1126,14 +1118,6 @@
                     return true;
                 });
 
-                if (!(transport instanceof UIHTMLTransport)) {
-                    terminal.textarea.addEventListener('paste', function (e) {
-                        e.preventDefault();
-                        var text = (e.clipboardData || window.clipboardData).getData('text');
-                        if (text && !entry.exited) transport.bufferInput(id, text);
-                    });
-                }
-
                 switchToWrapper(wrapper, tabEl);
 
                 void wrapper.offsetHeight;
@@ -1251,12 +1235,32 @@
             document.addEventListener('focusin', refocusActiveTerminal);
 
             function pasteFromClipboard(entry, id) {
-                if (transport instanceof UIHTMLTransport) {
-                    transport.send({ type: 'paste', id: id });
-                } else if (navigator.clipboard && navigator.clipboard.readText) {
+                if (!navigator.clipboard || !navigator.clipboard.readText) {
+                    if (transport) transport.send({ type: 'paste', id: id });
+                    return;
+                }
+                var handled = false;
+                var timer = setTimeout(function () {
+                    if (!handled) { handled = true; transport.send({ type: 'paste', id: id }); }
+                }, 500);
+                try {
                     navigator.clipboard.readText().then(function (text) {
-                        if (text && !entry.exited) transport.bufferInput(id, text);
-                    }).catch(function () {});
+                        if (handled) return;
+                        handled = true;
+                        clearTimeout(timer);
+                        if (text && !entry.exited) {
+                            transport.bufferInput(id, text);
+                        } else {
+                            transport.send({ type: 'paste', id: id });
+                        }
+                    }).catch(function () {
+                        if (handled) return;
+                        handled = true;
+                        clearTimeout(timer);
+                        transport.send({ type: 'paste', id: id });
+                    });
+                } catch (err) {
+                    if (!handled) { handled = true; clearTimeout(timer); transport.send({ type: 'paste', id: id }); }
                 }
             }
 
@@ -1319,8 +1323,10 @@
 
             document.addEventListener('click', dismissContextMenu);
 
+            // Only show custom context menu in uihtml mode (UIHTMLTransport).
+            // In DDG/WebSocket mode, the framework provides its own context menu.
             document.addEventListener('contextmenu', function (e) {
-                if (!transport) return;
+                if (!transport || !(transport instanceof UIHTMLTransport)) return;
                 if (!activeTabId || !tabs[activeTabId]) return;
                 if (!containerEl.contains(e.target)) return;
                 e.preventDefault();
