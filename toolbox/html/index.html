@@ -1234,19 +1234,13 @@
             window.addEventListener('focus', refocusActiveTerminal);
             document.addEventListener('focusin', refocusActiveTerminal);
 
-            // ---------------------
-            // Paste helper — uses the Clipboard API (browser-side) with
-            // fallback to the MATLAB-side clipboard('paste') transport message.
-            // ---------------------
             function pasteFromClipboard(entry, id) {
-                if (navigator.clipboard && navigator.clipboard.readText) {
+                if (transport instanceof UIHTMLTransport) {
+                    transport.send({ type: 'paste', id: id });
+                } else if (navigator.clipboard && navigator.clipboard.readText) {
                     navigator.clipboard.readText().then(function (text) {
                         if (text && !entry.exited) transport.bufferInput(id, text);
-                    }).catch(function () {
-                        if (transport) transport.send({ type: 'paste', id: id });
-                    });
-                } else {
-                    if (transport) transport.send({ type: 'paste', id: id });
+                    }).catch(function () {});
                 }
             }
 
